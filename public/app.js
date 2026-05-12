@@ -928,17 +928,17 @@ function renderTicketRow(row) {
   const code = ticketDisplayCode(row);
   return `
     <tr>
-      <td class="mono whitespace-nowrap">
+      <td class="mono ticket-cell-nowrap">
         <div class="font-semibold">#${escapeHtml(code)}</div>
         <button type="button" class="ticket-history-toggle text-xs text-blue-600 dark:text-blue-300 hover:underline" data-ticket-id="${escapeHtml(row.id)}">
           ${isExpanded ? "Hide" : "View"} history (${messageCount})
         </button>
       </td>
-      <td class="mono whitespace-nowrap">
+      <td class="mono ticket-cell-nowrap">
         <div>${escapeHtml(fmtTimeUtc(row.created_at))}</div>
         <div class="text-[10px] text-slate-400">${escapeHtml(fmtRelative(row.created_at))}</div>
       </td>
-      <td class="whitespace-nowrap">
+      <td>
         <div class="font-medium">${escapeHtml(ticketGroupName(row))}</div>
         ${row.telegram_chat_id ? `<div class="text-[10px] text-slate-400 mono">${escapeHtml(row.telegram_chat_id)}</div>` : ""}
       </td>
@@ -946,11 +946,11 @@ function renderTicketRow(row) {
         <div class="font-medium">${escapeHtml(row.opened_by_name)}</div>
         <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(row.opened_message_text)}</div>
       </td>
-      <td class="whitespace-nowrap">${status}</td>
-      <td class="whitespace-nowrap">${escapeHtml(scheduled)}</td>
-      <td class="whitespace-nowrap">${escapeHtml(assigned)}</td>
-      <td class="whitespace-nowrap">${escapeHtml(coverage)}</td>
-      <td class="mono whitespace-nowrap">${escapeHtml(fmtTimeUtc(row.closed_at))}</td>
+      <td>${status}</td>
+      <td>${escapeHtml(scheduled)}</td>
+      <td>${escapeHtml(assigned)}</td>
+      <td>${escapeHtml(coverage)}</td>
+      <td class="mono ticket-cell-nowrap">${escapeHtml(fmtTimeUtc(row.closed_at))}</td>
     </tr>
     ${isExpanded ? `
       <tr>

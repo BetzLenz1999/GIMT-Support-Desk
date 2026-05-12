@@ -89,10 +89,21 @@
         background: rgba(255 255 255 / 0.92);
         box-shadow: 0 16px 36px rgba(15 23 42 / 0.08);
       }
+      .tickets-full-page {
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+      }
       .dark .section-card {
         border-color: rgb(51 65 85);
         background: rgba(15 23 42 / 0.92);
         box-shadow: 0 16px 36px rgba(0 0 0 / 0.25);
+      }
+      .dark .tickets-full-page {
+        border: none;
+        background: transparent;
+        box-shadow: none;
       }
       .filter-panel {
         border: 1px solid rgb(204 251 241);
@@ -207,6 +218,38 @@
       }
       table.sheet tbody tr:hover td {
         background: rgb(240 253 250);
+      }
+      .tickets-table-wrap {
+        overflow-x: visible;
+      }
+      #tickets-table {
+        table-layout: fixed;
+        min-width: 0;
+      }
+      #tickets-table th,
+      #tickets-table td {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      #tickets-table th:nth-child(1) { width: 7%; }
+      #tickets-table th:nth-child(2) { width: 11%; }
+      #tickets-table th:nth-child(3) { width: 18%; }
+      #tickets-table th:nth-child(4) { width: 18%; }
+      #tickets-table th:nth-child(5) { width: 11%; }
+      #tickets-table th:nth-child(6) { width: 8%; }
+      #tickets-table th:nth-child(7) { width: 8%; }
+      #tickets-table th:nth-child(8) { width: 12%; }
+      #tickets-table th:nth-child(9) { width: 7%; }
+      .ticket-cell-nowrap {
+        white-space: nowrap;
+      }
+      @media (max-width: 900px) {
+        .tickets-table-wrap {
+          overflow-x: auto;
+        }
+        #tickets-table {
+          min-width: 980px;
+        }
       }
       .dark table.sheet thead th {
         background: rgb(19 78 74);
@@ -402,7 +445,7 @@
   </head>
   <body class="min-h-full bg-gradient-to-br from-slate-50 via-teal-50 to-sky-50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950 dark:text-slate-100">
     <header class="border-b border-teal-100 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur sticky top-0 z-20 shadow-sm">
-      <div class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap mobile-stack">
+      <div class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap mobile-stack">
         <div class="flex items-center gap-2 min-w-0">
           <span class="grid h-8 w-8 place-items-center rounded-full bg-teal-600 text-sm font-black text-white">G</span>
           <h1 class="text-base sm:text-lg font-semibold tracking-tight leading-tight">GoodDollar International Moderation Team</h1>
@@ -415,7 +458,7 @@
           </button>
         </div>
       </div>
-      <nav class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
+      <nav class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Home</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="activity">Activity History</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
@@ -424,7 +467,7 @@
       </nav>
     </header>
 
-    <main class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-5">
+    <main class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 py-4 sm:py-5">
       <section data-tab-panel="home">
         <div class="welcome-card rounded-3xl p-5 sm:p-7 mb-4 overflow-hidden relative">
           <div class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/50 dark:bg-teal-500/10"></div>
@@ -583,7 +626,7 @@
       </section>
 
       <!-- Support Tickets -->
-      <section data-tab-panel="tickets" class="section-card p-3 sm:p-4">
+      <section data-tab-panel="tickets" class="tickets-full-page p-0 sm:p-0">
         <div class="mb-4 flex items-start justify-between gap-3 flex-wrap">
           <div class="max-w-2xl">
             <h2 class="text-base font-semibold">Support Tickets</h2>
@@ -629,7 +672,7 @@
             </label>
           </div>
         </div>
-        <div class="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div class="tickets-table-wrap rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
           <table class="sheet" id="tickets-table">
             <thead>
               <tr>
