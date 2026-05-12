@@ -66,7 +66,8 @@ const state = {
   },
   tickets: {
     rows: [],
-    filters: { assigned_member_id: "", scheduled_member_id: "", status: "" },
+    groups: [],
+    filters: { assigned_member_id: "", scheduled_member_id: "", status: "", telegram_chat_id: "" },
     expandedIds: new Set()
   },
   memberDetail: {
@@ -146,6 +147,22 @@ function renderStatsGroupFilter(groups) {
     select.value = current;
   } else {
     state.stats.selectedGroupId = "";
+    select.value = "";
+  }
+}
+
+function renderTicketsGroupFilter(groups) {
+  const select = $("#tickets-group-filter");
+  const current = state.tickets.filters.telegram_chat_id;
+  select.innerHTML = '<option value="">All groups</option>' + groups
+    .map((group) => `<option value="${escapeHtml(group.telegram_chat_id)}">${escapeHtml(group.display_name || group.title || `Chat ${group.telegram_chat_id}`)}</option>`)
+    .join("");
+  if (current && groups.some((group) => String(group.telegram_chat_id) === current)) {
+    select.value = current;
+  } else if (current) {
+    select.innerHTML += `<option value="${escapeHtml(current)}">Chat ${escapeHtml(current)}</option>`;
+    select.value = current;
+  } else {
     select.value = "";
   }
 }
@@ -957,20 +974,49 @@ function renderTickets() {
   const coverageCount = rows.filter((row) => row.covered_for_member_id).length;
   const offDutyCount = rows.filter((row) => row.accepted_member_was_timed_in === false).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
-  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
+  const selectedGroup = state.tickets.filters.telegram_chat_id
+    ? state.tickets.groups.find((group) => String(group.telegram_chat_id) === state.tickets.filters.telegram_chat_id)
+    : null;
+  const groupLabel = selectedGroup
+    ? selectedGroup.display_name || selectedGroup.title || selectedGroup.telegram_chat_id
+    : state.tickets.filters.telegram_chat_id
+      ? `Chat ${state.tickets.filters.telegram_chat_id}`
+      : "All groups";
+  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
 }
 
 async function loadTickets() {
   const qs = new URLSearchParams({ limit: "500" });
-  const { assigned_member_id, scheduled_member_id, status } = state.tickets.filters;
+  const { assigned_member_id, scheduled_member_id, status, telegram_chat_id } = state.tickets.filters;
+  const from = $("#tickets-from").value;
+  const to = $("#tickets-to").value;
   if (assigned_member_id) qs.set("assigned_member_id", assigned_member_id);
   if (scheduled_member_id) qs.set("scheduled_member_id", scheduled_member_id);
   if (status) qs.set("status", status);
+  if (telegram_chat_id) qs.set("telegram_chat_id", telegram_chat_id);
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
 
   $("#tickets-body").innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Loading…</td></tr>';
   try {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.tickets.rows = data.tickets;
+    const groupsById = new Map(state.tickets.groups.map((group) => [String(group.telegram_chat_id), group]));
+    for (const ticket of data.tickets) {
+      if (!ticket.telegram_chat_id) continue;
+      const key = String(ticket.telegram_chat_id);
+      if (!groupsById.has(key)) {
+        groupsById.set(key, {
+          telegram_chat_id: ticket.telegram_chat_id,
+          title: ticket.group_title || null,
+          display_name: ticket.group_title || `Chat ${ticket.telegram_chat_id}`
+        });
+      }
+    }
+    state.tickets.groups = Array.from(groupsById.values()).sort((a, b) =>
+      String(a.display_name || a.title || a.telegram_chat_id).localeCompare(String(b.display_name || b.title || b.telegram_chat_id))
+    );
+    renderTicketsGroupFilter(state.tickets.groups);
     renderTickets();
   } catch (error) {
     $("#tickets-body").innerHTML = `<tr><td colspan="9" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to load: ${escapeHtml(error.message)}</td></tr>`;
@@ -1007,6 +1053,8 @@ function initDefaultDates() {
   $("#stats-to").value = iso(today);
   $("#proof-from").value = iso(thirtyDaysAgo);
   $("#proof-to").value = iso(today);
+  $("#tickets-from").value = iso(thirtyDaysAgo);
+  $("#tickets-to").value = iso(today);
 }
 
 function toggleWeek(section, key) {
@@ -1084,6 +1132,12 @@ async function init() {
     state.tickets.filters.status = e.target.value;
     loadTickets();
   });
+  $("#tickets-group-filter").addEventListener("change", (e) => {
+    state.tickets.filters.telegram_chat_id = e.target.value;
+    loadTickets();
+  });
+  $("#tickets-from").addEventListener("change", loadTickets);
+  $("#tickets-to").addEventListener("change", loadTickets);
 
   // Global delegated click handler for member links + week toggles + modal close
   document.addEventListener("click", (e) => {

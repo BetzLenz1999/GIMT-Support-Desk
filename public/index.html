@@ -77,6 +77,20 @@
         background: rgba(15 23 42 / 0.92);
         box-shadow: 0 16px 36px rgba(0 0 0 / 0.25);
       }
+      .filter-panel {
+        border: 1px solid rgb(204 251 241);
+        background: rgb(240 253 250);
+      }
+      .filter-control {
+        width: 100%;
+        min-width: 150px;
+        border-radius: 10px;
+        border-color: rgb(148 163 184);
+        background: white;
+        color: rgb(15 23 42);
+        font-size: 14px;
+        padding: 7px 10px;
+      }
       .tab-btn[aria-selected="true"] {
         background-color: rgb(13 148 136);
         color: white;
@@ -522,27 +536,49 @@
 
       <!-- Support Tickets -->
       <section data-tab-panel="tickets" class="section-card p-4 sm:p-5">
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div>
+        <div class="mb-4 flex items-start justify-between gap-3 flex-wrap">
+          <div class="max-w-2xl">
             <h2 class="text-base font-semibold">Support Tickets</h2>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Ticket history, assigned responders, scheduled duty owner, and off-duty coverage.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Filter by group, date, assigned responder, scheduled duty owner, or status.</p>
           </div>
-          <div class="flex items-center gap-2 text-sm flex-wrap">
-            <label class="text-xs text-slate-500 dark:text-slate-400">Assigned</label>
-            <select id="tickets-assigned-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
-            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Scheduled duty</label>
-            <select id="tickets-scheduled-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
-            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Status</label>
-            <select id="tickets-status" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1">
-              <option value="">All</option>
-              <option value="open">open</option>
-              <option value="accepted">accepted</option>
-              <option value="pending_user_resolution">pending_user_resolution</option>
-              <option value="solved_closed">solved_closed</option>
-              <option value="not_solved_closed">not_solved_closed</option>
-              <option value="closed_by_team">closed_by_team</option>
-              <option value="expired">expired</option>
-            </select>
+        </div>
+        <div class="filter-panel rounded-2xl p-3 mb-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Group
+              <select id="tickets-group-filter" class="filter-control mt-1">
+                <option value="">All groups</option>
+              </select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              From
+              <input id="tickets-from" type="date" class="filter-control mt-1" />
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              To
+              <input id="tickets-to" type="date" class="filter-control mt-1" />
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Assigned
+              <select id="tickets-assigned-member" class="filter-control mt-1"></select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Scheduled duty
+              <select id="tickets-scheduled-member" class="filter-control mt-1"></select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Status
+              <select id="tickets-status" class="filter-control mt-1">
+                <option value="">All</option>
+                <option value="open">open</option>
+                <option value="accepted">accepted</option>
+                <option value="pending_user_resolution">pending_user_resolution</option>
+                <option value="solved_closed">solved_closed</option>
+                <option value="not_solved_closed">not_solved_closed</option>
+                <option value="closed_by_team">closed_by_team</option>
+                <option value="expired">expired</option>
+              </select>
+            </label>
           </div>
         </div>
         <div class="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">

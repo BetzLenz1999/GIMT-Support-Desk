@@ -30,6 +30,7 @@ export default async function handler(request: any, response: any) {
     const assignedMemberId = url.searchParams.get("assigned_member_id");
     const scheduledMemberId = url.searchParams.get("scheduled_member_id");
     const status = url.searchParams.get("status");
+    const telegramChatId = url.searchParams.get("telegram_chat_id");
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
     const rowLimit = parseInteger(url.searchParams.get("limit"), 200, 1, 1000);
@@ -38,6 +39,7 @@ export default async function handler(request: any, response: any) {
     if (assignedMemberId) filters.push(eq("assigned_member_id", assignedMemberId));
     if (scheduledMemberId) filters.push(eq("scheduled_member_id", scheduledMemberId));
     if (status) filters.push(eq("status", status));
+    if (telegramChatId) filters.push(eq("telegram_chat_id", telegramChatId));
     if (from) filters.push(gteParam("created_at", `${from}T00:00:00.000Z`));
     if (to) filters.push(lteParam("created_at", `${to}T23:59:59.999Z`));
 
