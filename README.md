@@ -1,0 +1,203 @@
+# Working Management Telegram Bot
+
+A Vercel-ready Telegram attendance bot for the team's UTC schedule. The bot is buttons-first: team members use inline Telegram buttons for registration, Time In, Time Out, activity logs, excuses, absences, shift swaps, and dashboard refreshes.
+
+Alongside the bot, the same Vercel deployment serves a read-only dashboard at the deployment root (`https://YOUR-VERCEL-DOMAIN.vercel.app/`) with three tabs:
+
+- **Activity History** — sortable spreadsheet view of `activity_logs` (Time In, Time Out, Proof Submitted, Excuse, Absent, Shift Swap, etc.) with member + action filters and a search box.
+- **Stats** — group message stats per member (`group_message_stats`) with date-range filters and totals.
+- **Proof of Work** — full content of every proof-of-work submission (`proof_of_work_submissions`).
+
+The dashboard is public read-only; all attendance actions (Time In, Time Out, Proof of Work, Excuse, Absent, Shift Swap) continue to be performed in the Telegram bot itself.
+
+## Team schedule
+
+| Member | UTC Shift | Local timezone |
+| --- | --- | --- |
+| Betz | 00:00–05:00 UTC | Asia/Manila |
+| Omar | 05:00–10:00 UTC | Africa/Lagos |
+| Moh | 10:00–15:00 UTC | Africa/Lagos |
+| Pablo | 15:00–20:00 UTC | America/Argentina/Buenos_Aires |
+| Dany | 20:00–01:00 UTC | America/Bogota |
+
+Dany's shift crosses midnight, so the timekeeping logic treats the UTC end time as the next day.
+
+## Vercel environment variables
+
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+CRON_SECRET=
+# Optional primary group notifications
+TEAM_GROUP_CHAT_ID=
+# Optional public stats allowlist for multiple Telegram groups (comma- or space-separated)
+TEAM_STATS_GROUP_CHAT_IDS=
+```
+
+`SUPABASE_ANON_KEY` is supported only as a fallback, but `SUPABASE_SERVICE_ROLE_KEY` is recommended because the bot runs server-side and performs trusted writes.
+
+No Telegram personal chat ID environment variable is required. The bot saves each user's personal `telegram_chat_id` automatically when they open the bot and register.
+
+`TEAM_GROUP_CHAT_ID` is optional. Set it to your primary Telegram group chat ID if you want the bot to also post team-wide 1-hour and 10-minute pre-shift, shift-start, late-alert, Time Out reminder, missing-Time-Out, and blocked-early-Time-In warnings in that group. With this variable set, the primary group also receives a live broadcast each time someone uses the bot's private DM buttons for Time In, Time Out, Proof of Work submission, Excuse, Absent, or Shift Swap — so reminders are not the only messages the group sees.
+
+`TEAM_STATS_GROUP_CHAT_IDS` is optional and controls public message-stat tracking when the bot is present in multiple Telegram groups. Set it to comma- or space-separated chat IDs, for example `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`. When this env var is set, only those groups are counted in `group_message_stats` and shown on the dashboard. When it is not set, the bot keeps the previous permissive behavior and counts registered-member messages from any group where the bot receives messages.
+
+Changing `TEAM_GROUP_CHAT_ID` or adding IDs to `TEAM_STATS_GROUP_CHAT_IDS` does not reset Time In, Time Out, Activity History, or Proof of Work submissions. Those records stay member-based; only public message stats are separated by Telegram group chat ID.
+
+If `TEAM_GROUP_CHAT_ID` is not set or its value is wrong, the bot also keeps a stored fallback chat ID in `public.app_settings` (key `team_group_chat_id`). The fallback is populated automatically the first time the bot is added to a group (via the `my_chat_member` event) or, when no primary env var is set, the first time a registered member sends any message in a counted group. When `sendTeamGroupMessage` cannot post to the env-var chat (or no env var is set), it transparently retries against the stored fallback and logs a clear warning telling the operator which value to put in Vercel.
+
+## Supabase setup
+
+Run the SQL in [`supabase/schema.sql`](supabase/schema.sql) in your Supabase SQL editor before deploying. The script is idempotent (`create table if not exists`), so it is safe to re-run when new tables or indexes are added.
+
+When upgrading an existing deployment, re-running `supabase/schema.sql` will add the `public.group_action_messages` table that tracks team-group prompt and ack message IDs so old prompts can be cleaned up automatically. It will also add `public.telegram_groups`, which stores each tracked Telegram group's actual title so the web dashboard can show names such as GIMT, GoodDollar, or Support instead of only numeric chat IDs.
+
+Re-run `supabase/schema.sql` after deploying the support-ticket workflow as well. It adds `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events`; these tables are separate from `activity_logs`, `time_logs`, `proof_of_work_submissions`, and `group_message_stats`.
+
+## Telegram setup
+
+After deployment, set the Telegram webhook:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET"}'
+```
+
+## Bot workflow
+
+1. User sends `/start`.
+2. Bot saves Telegram user/chat metadata and asks the user to select their name using buttons.
+3. User sees the dashboard with UTC and local shift time.
+4. User taps buttons for Time In, Time Out, Activity, Excuse, Absent, Shift Swap, Submit Proof, or Refresh.
+5. Vercel cron routes send private shift reminders using the saved personal chat IDs and, when `TEAM_GROUP_CHAT_ID` is configured, matching team-wide warnings, including 1-hour Time In reminders, 1-hour proof-of-work reminders, and Time Out reminders, to the group.
+6. When `TEAM_GROUP_CHAT_ID` is configured, the bot also broadcasts each completed DM action (Time In, Time Out, Proof of Work, Excuse, Absent, Shift Swap requests and responses) to the team group so everyone can see attendance status in real time.
+7. Group prompts with "Time In Now", "Time Out Now", or "Submit Proof of Work" buttons are tracked by `public.group_action_messages`. As soon as the assigned member completes the action (from either the DM dashboard or the group button), the bot automatically deletes the stale prompts in the group and posts a single unified success summary. The success summary is short-lived: every 5 minutes the timekeeping cron sweeps and removes acknowledgements older than 5 minutes so the group stays uncluttered.
+8. When a member who is not the scheduled owner taps a group action button, the bot replies with a Telegram callback alert popup (visible only to that user) instead of posting a noisy "Only X can press this button." line to the group.
+
+The primary UX is buttons. `/start`, `/menu`, and `/help` are kept only as fallback commands to reopen the dashboard.
+
+## Web dashboard
+
+The dashboard lives in the [`public/`](public) folder and is served by Vercel as a static site at the deployment root URL. It calls these read-only JSON endpoints under [`api/web/`](api/web):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/web/members` | Static team roster + registration state (used to populate the member filter). |
+| `GET /api/web/activity?member_id=&action=&limit=` | Paginated `activity_logs` rows, newest first. |
+| `GET /api/web/group-stats?member_id=&telegram_chat_id=&from=&to=&limit=` | `group_message_stats` rows enriched with Telegram group names, group list, per-member totals, and per-group totals. |
+| `GET /api/web/proof-submissions?member_id=&from=&to=&limit=` | `proof_of_work_submissions` rows, newest first. |
+
+The dashboard is intentionally read-only and has no authentication. Anything sensitive should stay in Supabase row-level security or be omitted from these endpoints.
+
+## Cron routes
+
+Vercel cron runs:
+
+- `/api/cron/timekeeping` every 5 minutes for reminders and late/missing-time-out alerts.
+- `/api/cron/daily-report` daily at 01:05 UTC to store a daily summary in activity logs.
+
+Both endpoints accept either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET` when `CRON_SECRET` is configured.
+
+## Telegram group chat ID setup
+
+To get `TEAM_GROUP_CHAT_ID`:
+
+1. Deploy the latest bot code first, then add the bot to your Telegram group. When Telegram sends the bot-added event, the bot replies with the group `Chat ID` automatically.
+2. If you need to request it manually, send `/chatid@YourBotUsername` in the group. The aliases `/id@YourBotUsername`, `/groupid@YourBotUsername`, and `/start@YourBotUsername` also reply with the same chat ID.
+3. If the bot was already in the group before this code was deployed, remove it from the group, add it again, then try `/chatid@YourBotUsername`.
+4. Copy the `Chat ID` value from the bot reply. Group IDs are usually negative, for example `-1001234567890`.
+5. Add the primary notification group value as `TEAM_GROUP_CHAT_ID` in your Vercel environment variables and redeploy.
+6. If you want stats for multiple groups, add every stats group ID to `TEAM_STATS_GROUP_CHAT_IDS`, separated by commas or spaces. Example: `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`.
+
+After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 10 minutes before a member's shift starts, when the shift starts, when a member is late, 1 hour before a member's shift ends for proof-of-work submission, before a member's shift ends, when the shift ends, and when a member is missing Time Out. The Time In button also posts a group warning when an early Time In attempt is blocked.
+
+
+### Multiple group stats setup
+
+Use `TEAM_GROUP_CHAT_ID` for the one group that should receive reminders and attendance broadcasts. Use `TEAM_STATS_GROUP_CHAT_IDS` for all groups whose message counts should appear publicly in the Stats dashboard.
+
+Example with one primary notification group plus two additional stats groups:
+
+```env
+TEAM_GROUP_CHAT_ID=-1001111111111
+TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222,-1003333333333
+```
+
+In this example, reminders go to `-1001111111111`, while the dashboard can show separate stats for all three groups. The bot saves group titles from Telegram automatically when it is added to a group or receives a registered member's message there, so the Stats tab can display actual group names.
+
+Historical attendance data is not tied to these group IDs. You can move the primary notification group later by changing `TEAM_GROUP_CHAT_ID`; existing Time In, Time Out, Activity History, and Proof of Work rows remain unchanged. New message stats continue under the group chat ID where each message was sent.
+
+### Diagnosing `Bad Request: chat not found` errors
+
+If `/api/cron/timekeeping` logs `Failed to send team group message ... Bad Request: chat not found`, the bot configured by `TELEGRAM_BOT_TOKEN` cannot access the chat in `TEAM_GROUP_CHAT_ID`. Hit the debug endpoint to find out which side is wrong:
+
+```
+GET https://<your-deployment>/api/debug/group-chat?secret=<CRON_SECRET>
+```
+
+The response includes:
+
+- `bot.username` — the username of the bot the deployment is actually using. Compare with the bot username inside your Telegram group. If they differ, `TELEGRAM_BOT_TOKEN` points to a different bot than the one in your group.
+- `team_group_chat_id.configured` — the chat ID the deployment parsed from the env var. Compare with the value `/chatid@YourBotUsername` returns in the target group.
+- `chat` — the result of calling Telegram's `getChat` against that chat ID. On success it includes the group's `title` and `type`. On failure it includes the exact Telegram error (`chat not found`, `bot was kicked`, etc.) and a hint.
+- `stored_fallback_chat_id` — the chat ID the bot has remembered automatically (from `public.app_settings`). If `value` is null, the bot has not yet observed a registered member message in any group; ask such a member to send any message in the team group and the next call will return a value. When the env-var `getChat` call fails, the endpoint also calls `getChat` on the stored fallback and returns the result as `stored_fallback_chat` so you can confirm the fallback chat is reachable.
+- `registrations.members` — the list of team members currently registered with the bot (one entry per row in `public.team_registrations`). Each entry has `member_id`, `member_name`, `telegram_user_id`, `telegram_username`, and `registered_at`. If a member is missing from this list, group messages from their Telegram account will be silently skipped by the per-day message counter — have them DM the bot and `/start` to register.
+
+If `CRON_SECRET` is not set in Vercel, the endpoint is open; otherwise pass it as `?secret=...` or `Authorization: Bearer <CRON_SECRET>`.
+
+
+## In-group support ticket workflow
+
+The bot can open lightweight support tickets directly inside Telegram groups without mixing that history into attendance, activity, or proof-of-work records. When a non-registered group participant sends a support-style text such as `/support`, `/ticket`, `help`, `hello`, `hi`, `complaint`, `issue`, `problem`, or `not working`, the bot creates a row in `public.support_tickets`, records the opening message in `public.support_ticket_messages`, records a `ticket_opened` event in `public.support_ticket_events`, and replies directly to the requester’s original Telegram message.
+
+Button flow:
+
+1. The requester sends a support-style message in a group.
+2. The bot replies to that original message with **✅ Accept Ticket**.
+3. Only a registered team member can accept the ticket. Any registered team member may accept so customers can still receive help outside the scheduled responder’s shift; non-team members receive a private alert that only registered team members can accept tickets.
+4. On accept, the bot records who was scheduled for duty when the ticket opened, whether the accepting member was actively timed in, whether they accepted during their own scheduled shift, and whether they covered for another member. This makes it visible in Support Tickets history when, for example, Moh handled a ticket during Betz's duty window.
+5. After a valid accept, the bot replies to the original requester message with `<MemberName> is now live to assist you!` and shows **🧾 Ask User If Solved**.
+6. Only the assigned team member can click **🧾 Ask User If Solved**. The bot replies to the original requester message with `<UserName>, was your issue resolved?` and shows **✅ Solved** and **❌ Not Solved**.
+7. Only the original Telegram user who opened that specific ticket can click **✅ Solved** or **❌ Not Solved**. Other group users, unregistered users, and team members receive a private callback alert: `Only the ticket requester can answer this.` No noisy group message is posted for unauthorized clicks.
+8. If the requester clicks **✅ Solved**, the ticket is closed with `status = 'solved_closed'`, `resolution = 'solved'`, `resolved_at`, and `closed_at`, and the bot replies `✅ Ticket closed as solved. Thank you!`.
+9. If the requester clicks **❌ Not Solved**, the ticket is closed with `status = 'not_solved_closed'`, `resolution = 'not_solved'`, `resolved_at`, and `closed_at`, and the bot replies `❌ Ticket closed as not solved. The team can review this in ticket history.`
+
+Support ticket history is intentionally independent from attendance and activity history. Non-registered requesters are not counted in team stats, while registered team members’ ordinary group replies can still be counted in `group_message_stats` as normal team activity. The dashboard has a **Support Tickets** tab for reviewing assigned responders, scheduled-duty owners, and off-duty coverage handoffs.
+
+## Group chat activity analytics
+
+When `TEAM_GROUP_CHAT_ID` is configured, the bot keeps a daily counter of how many messages each registered team member sends in the team group. Counts are stored in `public.group_message_stats` (one row per `(member_id, telegram_chat_id, work_date_utc)`) and incremented atomically via the SQL function `public.increment_group_message_count`. Rows are never deleted, so the table acts as a permanent, per-day activity log you can query directly in Supabase.
+
+Example query — last 7 days of activity per member:
+
+```sql
+select member_name, work_date_utc, message_count, last_message_at_utc
+from public.group_message_stats
+where work_date_utc >= current_date - interval '7 days'
+order by work_date_utc desc, message_count desc;
+```
+
+Behavior:
+
+- Any message in a group from a registered team member is counted, and the bot remembers that chat as the team group fallback in `public.app_settings`. If `TEAM_GROUP_CHAT_ID` is set to a different chat, the bot still counts the message and logs a one-time warning so the operator can update the env var.
+- Only messages from team members who have registered with the bot in DM are counted; messages from visitors / non-registered users are skipped silently.
+- Slash commands (`/start`, `/menu`, `/help`, `/chatid*`, etc.) handled by the bot are NOT counted, since they are intercepted before the tracking step.
+- Every other message type that Telegram delivers (text, photos, videos, stickers, GIFs, voice notes, etc.) increments the day's counter for that member.
+- The day boundary is UTC, matching the rest of the timekeeping system.
+
+**Important — bot must see group messages.** Telegram bots in Group Privacy mode only receive commands and direct mentions, so the message counter would always be zero. Disable Group Privacy in BotFather: open `@BotFather`, send `/setprivacy`, select the bot, then choose **Disable**. Alternatively, promote the bot to admin in the group — admin bots always receive every message regardless of the privacy setting. After changing the setting, remove the bot from the group and re-add it for the change to take effect.
+
+## Proof of work reminders
+
+The timekeeping cron sends proof-of-work reminders exactly 1 hour before each member's scheduled out time, within the existing 5-minute cron window. The reminder is sent to the member's personal Telegram chat and, when `TEAM_GROUP_CHAT_ID` is configured, to the team group.
+
+Reminder text:
+
+```text
+Hi Betz, please attach your proof of work here before your work time ends. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.
+```
+
+Team members can tap **Submit Proof of Work** from the reminder or **Submit Proof** from the dashboard. Any non-empty text is accepted and saved to `proof_of_work_submissions`; sent reminder tracking is saved to `proof_of_work_reminders`. Submissions made after the scheduled out time are stored with `status = 'late'`.
