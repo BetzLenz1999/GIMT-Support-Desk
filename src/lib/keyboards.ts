@@ -1,14 +1,17 @@
 import { TEAM_SCHEDULE, getOtherMembers } from "./team-schedule.js";
 import type { InlineKeyboardMarkup } from "./telegram-types.js";
 
-export function registrationKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      TEAM_SCHEDULE.slice(0, 2).map((member) => ({ text: member.name, callback_data: `register:${member.id}` })),
-      TEAM_SCHEDULE.slice(2, 4).map((member) => ({ text: member.name, callback_data: `register:${member.id}` })),
-      TEAM_SCHEDULE.slice(4).map((member) => ({ text: member.name, callback_data: `register:${member.id}` }))
-    ]
-  };
+export function registrationKeyboard(registeredMemberIds: Set<string> = new Set()): InlineKeyboardMarkup {
+  const buttons = TEAM_SCHEDULE
+    .filter((member) => !registeredMemberIds.has(member.id))
+    .map((member) => ({ text: member.name, callback_data: `register:${member.id}` }));
+
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 2) {
+    rows.push(buttons.slice(index, index + 2));
+  }
+
+  return { inline_keyboard: rows };
 }
 
 export function dashboardKeyboard(): InlineKeyboardMarkup {
