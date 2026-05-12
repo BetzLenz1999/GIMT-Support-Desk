@@ -28,6 +28,23 @@
     </script>
     <style>
       body { font-feature-settings: "ss01", "cv11"; }
+      .dashboard-shell {
+        transform-origin: top center;
+      }
+      @media (min-width: 1024px) {
+        .dashboard-shell {
+          transform: scale(0.7);
+          width: 142.857%;
+          margin-left: -21.4285%;
+        }
+        header .dashboard-shell {
+          margin-bottom: -22px;
+        }
+        main.dashboard-shell {
+          margin-top: -8px;
+          margin-bottom: -30%;
+        }
+      }
       [data-tab-panel] { display: none; }
       [data-tab-panel].active { display: block; }
       .welcome-card {
@@ -42,13 +59,13 @@
       }
       .menu-card {
         display: flex;
-        min-height: 132px;
+        min-height: 116px;
         flex-direction: column;
         justify-content: space-between;
         border-radius: 18px;
         border: 1px solid rgb(203 213 225);
         background: white;
-        padding: 18px;
+        padding: 14px;
         text-align: left;
         box-shadow: 0 12px 28px rgba(15 23 42 / 0.07);
         transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
@@ -90,6 +107,37 @@
         color: rgb(15 23 42);
         font-size: 14px;
         padding: 7px 10px;
+      }
+      @media (max-width: 640px) {
+        body {
+          background: rgb(248 250 252);
+        }
+        .mobile-stack {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .mobile-stack > * {
+          width: 100%;
+        }
+        .tab-btn {
+          flex: 0 0 auto;
+        }
+        .section-card {
+          border-radius: 14px;
+        }
+        .menu-card {
+          min-height: 104px;
+        }
+        .filter-control {
+          min-width: 0;
+        }
+        table.sheet {
+          font-size: 12px;
+        }
+        table.sheet thead th,
+        table.sheet tbody td {
+          padding: 6px 8px;
+        }
       }
       .tab-btn[aria-selected="true"] {
         background-color: rgb(13 148 136);
@@ -354,10 +402,10 @@
   </head>
   <body class="min-h-full bg-gradient-to-br from-slate-50 via-teal-50 to-sky-50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950 dark:text-slate-100">
     <header class="border-b border-teal-100 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur sticky top-0 z-20 shadow-sm">
-      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-        <div class="flex items-center gap-2">
+      <div class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap mobile-stack">
+        <div class="flex items-center gap-2 min-w-0">
           <span class="grid h-8 w-8 place-items-center rounded-full bg-teal-600 text-sm font-black text-white">G</span>
-          <h1 class="text-lg font-semibold tracking-tight">GoodDollar International Moderation Team</h1>
+          <h1 class="text-base sm:text-lg font-semibold tracking-tight leading-tight">GoodDollar International Moderation Team</h1>
           <span class="text-xs px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-200">2024–2026</span>
         </div>
         <div class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
@@ -367,7 +415,7 @@
           </button>
         </div>
       </div>
-      <nav class="max-w-6xl mx-auto px-4 pb-3 flex gap-1.5 overflow-x-auto" role="tablist">
+      <nav class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Home</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="activity">Activity History</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
@@ -376,14 +424,14 @@
       </nav>
     </header>
 
-    <main class="max-w-6xl mx-auto px-4 py-6">
+    <main class="dashboard-shell max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-5">
       <section data-tab-panel="home">
-        <div class="welcome-card rounded-3xl p-6 sm:p-8 mb-6 overflow-hidden relative">
+        <div class="welcome-card rounded-3xl p-5 sm:p-7 mb-4 overflow-hidden relative">
           <div class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/50 dark:bg-teal-500/10"></div>
           <div class="absolute -left-16 -bottom-20 h-48 w-48 rounded-full bg-sky-200/50 dark:bg-sky-500/10"></div>
           <div class="relative max-w-3xl">
             <p class="text-xs font-bold uppercase tracking-[0.25em] text-teal-700 dark:text-teal-300 mb-3">Dashboard Portal</p>
-            <h2 class="text-3xl sm:text-5xl font-black tracking-tight text-slate-950 dark:text-white leading-tight">
+            <h2 class="text-2xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white leading-tight">
               WELCOME TO GOODDOLLAR INTERNATIONAL MODERATION TEAM 2024–2026
             </h2>
             <p class="mt-4 text-sm sm:text-base text-slate-600 dark:text-slate-300">
@@ -392,7 +440,7 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <button type="button" class="menu-card" data-menu-tab="activity">
             <span class="text-3xl font-black text-teal-600 dark:text-teal-300">A</span>
             <span>
@@ -425,13 +473,13 @@
       </section>
 
       <!-- Activity History (spreadsheet) -->
-      <section data-tab-panel="activity" class="section-card p-4 sm:p-5">
+      <section data-tab-panel="activity" class="section-card p-3 sm:p-4">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Activity History</h2>
             <p class="text-xs text-slate-500 dark:text-slate-400">Click any column header to sort.</p>
           </div>
-          <div class="flex items-center gap-2 text-sm flex-wrap">
+          <div class="flex items-center gap-2 text-sm flex-wrap mobile-stack sm:justify-end">
             <label class="text-xs text-slate-500 dark:text-slate-400">Member</label>
             <select id="activity-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
             <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Action</label>
@@ -473,13 +521,13 @@
       </section>
 
       <!-- Stats -->
-      <section data-tab-panel="stats" class="section-card p-4 sm:p-5">
+      <section data-tab-panel="stats" class="section-card p-3 sm:p-4">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Group Message Stats</h2>
             <p class="text-xs text-slate-500 dark:text-slate-400">Daily log of how many messages each member sent in each tracked Telegram group.</p>
           </div>
-          <div class="flex items-center gap-2 text-sm flex-wrap">
+          <div class="flex items-center gap-2 text-sm flex-wrap mobile-stack sm:justify-end">
             <div class="inline-flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden" role="tablist" aria-label="Group stats grouping">
               <button id="stats-group-date" class="px-2.5 py-1 text-xs font-medium" aria-selected="true">By Date</button>
               <button id="stats-group-member" class="px-2.5 py-1 text-xs font-medium border-l border-slate-300 dark:border-slate-700" aria-selected="false">By Member</button>
@@ -513,13 +561,13 @@
       </section>
 
       <!-- Proof of Work -->
-      <section data-tab-panel="proof" class="section-card p-4 sm:p-5">
+      <section data-tab-panel="proof" class="section-card p-3 sm:p-4">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Proof of Work Submissions</h2>
             <p class="text-xs text-slate-500 dark:text-slate-400">All proof of work submissions from the team.</p>
           </div>
-          <div class="flex items-center gap-2 text-sm flex-wrap">
+          <div class="flex items-center gap-2 text-sm flex-wrap mobile-stack sm:justify-end">
             <label class="text-xs text-slate-500 dark:text-slate-400">Member</label>
             <select id="proof-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
             <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">From</label>
@@ -535,7 +583,7 @@
       </section>
 
       <!-- Support Tickets -->
-      <section data-tab-panel="tickets" class="section-card p-4 sm:p-5">
+      <section data-tab-panel="tickets" class="section-card p-3 sm:p-4">
         <div class="mb-4 flex items-start justify-between gap-3 flex-wrap">
           <div class="max-w-2xl">
             <h2 class="text-base font-semibold">Support Tickets</h2>
