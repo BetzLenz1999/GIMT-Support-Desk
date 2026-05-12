@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <title>Working Management — Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%8F%B1%EF%B8%8F%3C/text%3E%3C/svg%3E" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
-        darkMode: "media",
+        darkMode: "class",
         theme: {
           extend: {
             fontFamily: {
@@ -30,15 +30,76 @@
       body { font-feature-settings: "ss01", "cv11"; }
       [data-tab-panel] { display: none; }
       [data-tab-panel].active { display: block; }
+      .welcome-card {
+        border: 1px solid rgb(153 246 228);
+        background: linear-gradient(135deg, white 0%, rgb(240 253 250) 55%, rgb(236 254 255) 100%);
+        box-shadow: 0 18px 42px rgba(15 118 110 / 0.14);
+      }
+      .dark .welcome-card {
+        border-color: rgb(51 65 85);
+        background: linear-gradient(135deg, rgb(15 23 42), rgb(30 41 59));
+        box-shadow: 0 18px 42px rgba(0 0 0 / 0.35);
+      }
+      .menu-card {
+        display: flex;
+        min-height: 132px;
+        flex-direction: column;
+        justify-content: space-between;
+        border-radius: 18px;
+        border: 1px solid rgb(203 213 225);
+        background: white;
+        padding: 18px;
+        text-align: left;
+        box-shadow: 0 12px 28px rgba(15 23 42 / 0.07);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      }
+      .menu-card:hover {
+        transform: translateY(-2px);
+        border-color: rgb(20 184 166);
+        box-shadow: 0 18px 38px rgba(15 23 42 / 0.12);
+      }
+      .dark .menu-card {
+        border-color: rgb(51 65 85);
+        background: rgb(15 23 42);
+        box-shadow: 0 12px 28px rgba(0 0 0 / 0.25);
+      }
+      .dark .menu-card:hover {
+        border-color: rgb(45 212 191);
+      }
+      .section-card {
+        border-radius: 18px;
+        border: 1px solid rgb(203 213 225);
+        background: rgba(255 255 255 / 0.92);
+        box-shadow: 0 16px 36px rgba(15 23 42 / 0.08);
+      }
+      .dark .section-card {
+        border-color: rgb(51 65 85);
+        background: rgba(15 23 42 / 0.92);
+        box-shadow: 0 16px 36px rgba(0 0 0 / 0.25);
+      }
+      .filter-panel {
+        border: 1px solid rgb(204 251 241);
+        background: rgb(240 253 250);
+      }
+      .filter-control {
+        width: 100%;
+        min-width: 150px;
+        border-radius: 10px;
+        border-color: rgb(148 163 184);
+        background: white;
+        color: rgb(15 23 42);
+        font-size: 14px;
+        padding: 7px 10px;
+      }
       .tab-btn[aria-selected="true"] {
-        background-color: rgb(17 24 39);
+        background-color: rgb(13 148 136);
         color: white;
-        border-color: rgb(17 24 39);
+        border-color: rgb(13 148 136);
       }
       .dark .tab-btn[aria-selected="true"] {
-        background-color: rgb(229 231 235);
-        color: rgb(17 24 39);
-        border-color: rgb(229 231 235);
+        background-color: rgb(45 212 191);
+        color: rgb(15 23 42);
+        border-color: rgb(45 212 191);
       }
       .pill {
         display: inline-flex;
@@ -70,8 +131,8 @@
       table.sheet thead th {
         position: sticky;
         top: 0;
-        background: rgb(241 245 249);
-        color: rgb(71 85 105);
+        background: rgb(240 253 250);
+        color: rgb(15 118 110);
         font-weight: 600;
         font-size: 11px;
         letter-spacing: 0.04em;
@@ -97,18 +158,18 @@
         vertical-align: top;
       }
       table.sheet tbody tr:hover td {
-        background: rgb(248 250 252);
+        background: rgb(240 253 250);
       }
       .dark table.sheet thead th {
-        background: rgb(15 23 42);
-        color: rgb(148 163 184);
+        background: rgb(19 78 74);
+        color: rgb(204 251 241);
         border-bottom-color: rgb(51 65 85);
       }
       .dark table.sheet tbody td {
         border-bottom-color: rgb(30 41 59);
       }
       .dark table.sheet tbody tr:hover td {
-        background: rgb(15 23 42);
+        background: rgb(19 78 74);
       }
       .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
 
@@ -291,13 +352,13 @@
       .dark .modal-section-title { color: rgb(148 163 184); }
     </style>
   </head>
-  <body class="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-    <header class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
+  <body class="min-h-full bg-gradient-to-br from-slate-50 via-teal-50 to-sky-50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950 dark:text-slate-100">
+    <header class="border-b border-teal-100 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur sticky top-0 z-20 shadow-sm">
       <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-2">
-          <span class="text-xl">⏱️</span>
-          <h1 class="text-lg font-semibold tracking-tight">Working Management</h1>
-          <span class="text-xs px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Dashboard</span>
+          <span class="grid h-8 w-8 place-items-center rounded-full bg-teal-600 text-sm font-black text-white">G</span>
+          <h1 class="text-lg font-semibold tracking-tight">GoodDollar International Moderation Team</h1>
+          <span class="text-xs px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-200">2024–2026</span>
         </div>
         <div class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
           <span id="last-updated">—</span>
@@ -307,16 +368,64 @@
         </div>
       </div>
       <nav class="max-w-6xl mx-auto px-4 pb-3 flex gap-1.5 overflow-x-auto" role="tablist">
-        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="true" data-tab="activity">Activity History</button>
-        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
-        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="proof">Proof of Work</button>
-        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="tickets">Support Tickets</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Home</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="activity">Activity History</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="proof">Proof of Work</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="tickets">Support Tickets</button>
       </nav>
     </header>
 
     <main class="max-w-6xl mx-auto px-4 py-6">
+      <section data-tab-panel="home">
+        <div class="welcome-card rounded-3xl p-6 sm:p-8 mb-6 overflow-hidden relative">
+          <div class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/50 dark:bg-teal-500/10"></div>
+          <div class="absolute -left-16 -bottom-20 h-48 w-48 rounded-full bg-sky-200/50 dark:bg-sky-500/10"></div>
+          <div class="relative max-w-3xl">
+            <p class="text-xs font-bold uppercase tracking-[0.25em] text-teal-700 dark:text-teal-300 mb-3">Dashboard Portal</p>
+            <h2 class="text-3xl sm:text-5xl font-black tracking-tight text-slate-950 dark:text-white leading-tight">
+              WELCOME TO GOODDOLLAR INTERNATIONAL MODERATION TEAM 2024–2026
+            </h2>
+            <p class="mt-4 text-sm sm:text-base text-slate-600 dark:text-slate-300">
+              Select a menu below to view Activity History, Stats, Proof of Work, or Support Tickets. Dashboard content stays hidden until you choose a section.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <button type="button" class="menu-card" data-menu-tab="activity">
+            <span class="text-3xl font-black text-teal-600 dark:text-teal-300">A</span>
+            <span>
+              <span class="block text-lg font-bold text-slate-950 dark:text-white">Activity History</span>
+              <span class="block mt-1 text-sm text-slate-600 dark:text-slate-300">Time In, Time Out, excuses, absences, and shift actions.</span>
+            </span>
+          </button>
+          <button type="button" class="menu-card" data-menu-tab="stats">
+            <span class="text-3xl font-black text-teal-600 dark:text-teal-300">S</span>
+            <span>
+              <span class="block text-lg font-bold text-slate-950 dark:text-white">Stats</span>
+              <span class="block mt-1 text-sm text-slate-600 dark:text-slate-300">Group message counts by member and tracked chat.</span>
+            </span>
+          </button>
+          <button type="button" class="menu-card" data-menu-tab="proof">
+            <span class="text-3xl font-black text-teal-600 dark:text-teal-300">✓</span>
+            <span>
+              <span class="block text-lg font-bold text-slate-950 dark:text-white">Proof of Work</span>
+              <span class="block mt-1 text-sm text-slate-600 dark:text-slate-300">Submitted work proofs and history per member.</span>
+            </span>
+          </button>
+          <button type="button" class="menu-card" data-menu-tab="tickets">
+            <span class="text-3xl font-black text-teal-600 dark:text-teal-300">T</span>
+            <span>
+              <span class="block text-lg font-bold text-slate-950 dark:text-white">Support Tickets</span>
+              <span class="block mt-1 text-sm text-slate-600 dark:text-slate-300">Ticket status, assigned responder, and coverage log.</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
       <!-- Activity History (spreadsheet) -->
-      <section data-tab-panel="activity" class="active">
+      <section data-tab-panel="activity" class="section-card p-4 sm:p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Activity History</h2>
@@ -364,7 +473,7 @@
       </section>
 
       <!-- Stats -->
-      <section data-tab-panel="stats">
+      <section data-tab-panel="stats" class="section-card p-4 sm:p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Group Message Stats</h2>
@@ -404,7 +513,7 @@
       </section>
 
       <!-- Proof of Work -->
-      <section data-tab-panel="proof">
+      <section data-tab-panel="proof" class="section-card p-4 sm:p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 class="text-base font-semibold">Proof of Work Submissions</h2>
@@ -426,28 +535,50 @@
       </section>
 
       <!-- Support Tickets -->
-      <section data-tab-panel="tickets">
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div>
+      <section data-tab-panel="tickets" class="section-card p-4 sm:p-5">
+        <div class="mb-4 flex items-start justify-between gap-3 flex-wrap">
+          <div class="max-w-2xl">
             <h2 class="text-base font-semibold">Support Tickets</h2>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Ticket history, assigned responders, scheduled duty owner, and off-duty coverage.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Filter by group, date, assigned responder, scheduled duty owner, or status.</p>
           </div>
-          <div class="flex items-center gap-2 text-sm flex-wrap">
-            <label class="text-xs text-slate-500 dark:text-slate-400">Assigned</label>
-            <select id="tickets-assigned-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
-            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Scheduled duty</label>
-            <select id="tickets-scheduled-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
-            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Status</label>
-            <select id="tickets-status" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1">
-              <option value="">All</option>
-              <option value="open">open</option>
-              <option value="accepted">accepted</option>
-              <option value="pending_user_resolution">pending_user_resolution</option>
-              <option value="solved_closed">solved_closed</option>
-              <option value="not_solved_closed">not_solved_closed</option>
-              <option value="closed_by_team">closed_by_team</option>
-              <option value="expired">expired</option>
-            </select>
+        </div>
+        <div class="filter-panel rounded-2xl p-3 mb-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Group
+              <select id="tickets-group-filter" class="filter-control mt-1">
+                <option value="">All groups</option>
+              </select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              From
+              <input id="tickets-from" type="date" class="filter-control mt-1" />
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              To
+              <input id="tickets-to" type="date" class="filter-control mt-1" />
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Assigned
+              <select id="tickets-assigned-member" class="filter-control mt-1"></select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Scheduled duty
+              <select id="tickets-scheduled-member" class="filter-control mt-1"></select>
+            </label>
+            <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Status
+              <select id="tickets-status" class="filter-control mt-1">
+                <option value="">All</option>
+                <option value="open">open</option>
+                <option value="accepted">accepted</option>
+                <option value="pending_user_resolution">pending_user_resolution</option>
+                <option value="solved_closed">solved_closed</option>
+                <option value="not_solved_closed">not_solved_closed</option>
+                <option value="closed_by_team">closed_by_team</option>
+                <option value="expired">expired</option>
+              </select>
+            </label>
           </div>
         </div>
         <div class="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
