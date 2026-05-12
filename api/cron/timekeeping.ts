@@ -19,8 +19,11 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
-    const result = await runTimekeepingCron(getSupabase());
-    sendJson(response, 200, { ok: true, ...result });
+    const startedAt = new Date();
+    console.log(`[cron-timekeeping] started at ${startedAt.toISOString()}`);
+    const result = await runTimekeepingCron(getSupabase(), startedAt);
+    console.log(`[cron-timekeeping] completed: sent=${result.sent}, groupSent=${result.groupSent}, sweptExpired=${result.sweptExpired}`);
+    sendJson(response, 200, { ok: true, ranAt: startedAt.toISOString(), ...result });
   } catch (error) {
     console.error(error);
     sendJson(response, 500, { ok: false, error: "Cron failed" });
