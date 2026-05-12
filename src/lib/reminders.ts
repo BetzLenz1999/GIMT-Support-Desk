@@ -106,7 +106,7 @@ Late By: ${formatDuration(minutesSinceStart)}
       }
     }
 
-    if (!hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
+    if (hasTimedIn && !hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
       const personalProofMessage = buildProofOfWorkReminderMessage(member.name, window.end, member.timezone);
       const groupProofMessage = buildProofOfWorkReminderMessage(mention, window.end, member.timezone);
       sent += await sendProofOfWorkOnce(db, registration, window.workDateUtc, window.end, now, "personal", personalProofMessage);
@@ -225,7 +225,7 @@ async function sendGroupOnce(
 
 
 function buildProofOfWorkReminderMessage(displayName: string, scheduledOut: Date, timezone: string): string {
-  return `Hi ${displayName}, please attach your proof of work here before your work time ends. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.\n\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
+  return `Hi ${displayName}, please attach your proof of work here before your work time ends. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.\n\n⚠️ Important: proof submission only works while you are actively timed in. It closes after your scheduled Time Out.\n\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
 }
 
 async function sendProofOfWorkOnce(
