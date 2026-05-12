@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/timekeeping",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-report",
+      "schedule": "5 1 * * *"
+    }
+  ]
+}
