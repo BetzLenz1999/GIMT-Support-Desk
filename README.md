@@ -130,6 +130,11 @@ To get `TEAM_GROUP_CHAT_ID`:
 
 After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 10 minutes before a member's shift starts, when the shift starts, when a member is late, 1 hour before a member's shift ends for proof-of-work submission, before a member's shift ends, when the shift ends, and when a member is missing Time Out. The Time In button also posts a group warning when an early Time In attempt is blocked.
 
+### Timekeeping cron schedule
+
+The reminders are only automatic when the host runs the timekeeping cron on a schedule. Vercel uses `vercel.json` to call `/api/cron/timekeeping` every 5 minutes. Netlify uses `netlify.toml` to run the `cron-timekeeping` scheduled function every 5 minutes; after deploy, confirm the function has a **Scheduled** badge in the Netlify Functions page. The daily report cron runs at 01:05 UTC in both hosts.
+
+If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically.
 
 ### Multiple group stats setup
 
