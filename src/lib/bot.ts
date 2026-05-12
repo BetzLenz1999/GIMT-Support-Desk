@@ -158,7 +158,11 @@ async function trackGroupMessage(
       return;
     }
 
-    if (state?.state === "awaiting_support_concern") return;
+    if (state?.state === "awaiting_support_concern") {
+      await deleteStoredSupportPromptMessage(message.chat.id, state.payload);
+      await promptSupportConcernSelection(db, message, user);
+      return;
+    }
 
     await promptSupportConcernSelection(db, message, user);
     return;
@@ -376,7 +380,8 @@ async function promptSupportConcernSelection(
 
 async function deleteStoredSupportPromptMessage(chatId: number, payload: Record<string, unknown>): Promise<void> {
   const promptMessageId = typeof payload.prompt_message_id === "number" ? payload.prompt_message_id : null;
-  if (promptMessageId) await deleteMessage(chatId, promptMessageId);
+  const promptChatId = typeof payload.telegram_chat_id === "number" ? payload.telegram_chat_id : chatId;
+  if (promptMessageId) await deleteMessage(promptChatId, promptMessageId);
 }
 
 async function deleteCallbackMessage(chatId: number, callback: TelegramCallbackQuery): Promise<void> {
