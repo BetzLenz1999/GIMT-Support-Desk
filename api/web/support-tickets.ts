@@ -1,0 +1,88 @@
+import { eq, inList, limit, order, params, type SupportTicket, type SupportTicketMessage, type TelegramGroup } from "../../src/lib/supabase.js";
+import { getSupabase } from "../../src/lib/supabase.js";
+import { listSupportTicketMessages } from "../../src/lib/repository.js";
+
+function sendJson(response: any, statusCode: number, payload: unknown) {
+  response.statusCode = statusCode;
+  response.setHeader("content-type", "application/json");
+  response.setHeader("cache-control", "no-store");
+  response.end(JSON.stringify(payload));
+}
+
+function parseInteger(value: string | null, fallback: number, min: number, max: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function gteParam(field: string, value: string): [string, string] {
+  return [field, `gte.${value}`];
+}
+
+function lteParam(field: string, value: string): [string, string] {
+  return [field, `lte.${value}`];
+}
+
+export default async function handler(request: any, response: any) {
+  try {
+    const url = new URL(request.url ?? "/", "https://example.com");
+    const assignedMemberId = url.searchParams.get("assigned_member_id");
+    const scheduledMemberId = url.searchParams.get("scheduled_member_id");
+    const status = url.searchParams.get("status");
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const rowLimit = parseInteger(url.searchParams.get("limit"), 200, 1, 1000);
+
+    const filters: [string, string][] = [order("created_at", false), limit(rowLimit)];
+    if (assignedMemberId) filters.push(eq("assigned_member_id", assignedMemberId));
+    if (scheduledMemberId) filters.push(eq("scheduled_member_id", scheduledMemberId));
+    if (status) filters.push(eq("status", status));
+    if (from) filters.push(gteParam("created_at", `${from}T00:00:00.000Z`));
+    if (to) filters.push(lteParam("created_at", `${to}T23:59:59.999Z`));
+
+    const db = getSupabase();
+    const tickets = await db.select<SupportTicket>("support_tickets", params(...filters));
+    const messages = await listSupportTicketMessages(db, tickets.map((ticket) => ticket.id));
+    const chatIds = Array.from(new Set(tickets.map((ticket) => ticket.telegram_chat_id).filter(Boolean)));
+    let groups: TelegramGroup[] = [];
+    if (chatIds.length > 0) {
+      try {
+        groups = await db.select<TelegramGroup>("telegram_groups", params(inList("telegram_chat_id", chatIds)));
+      } catch (error) {
+        console.warn(`Could not load telegram_groups metadata for support tickets: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const groupsByChatId = new Map(groups.map((group) => [group.telegram_chat_id, group]));
+    const messagesByTicket = messages.reduce<Record<string, SupportTicketMessage[]>>((acc, message) => {
+      (acc[message.ticket_id] ??= []).push(message);
+      return acc;
+    }, {});
+    const ticketsWithMessages = tickets.map((ticket) => ({
+      ...ticket,
+      group_title: ticket.group_title || groupsByChatId.get(ticket.telegram_chat_id)?.title || null,
+      messages: messagesByTicket[ticket.id] ?? []
+    }));
+
+    const coverage = tickets
+      .filter((ticket) => ticket.covered_for_member_id && ticket.assigned_member_id)
+      .map((ticket) => ({
+        ticket_id: ticket.id,
+        opened_at: ticket.created_at,
+        requester: ticket.opened_by_name,
+        scheduled_member_id: ticket.covered_for_member_id,
+        scheduled_member_name: ticket.covered_for_member_name,
+        accepted_by_member_id: ticket.assigned_member_id,
+        accepted_by_member_name: ticket.assigned_member_name,
+        accepted_member_was_timed_in: ticket.accepted_member_was_timed_in,
+        accepted_during_own_shift: ticket.accepted_during_own_shift
+      }));
+
+    sendJson(response, 200, { ok: true, count: tickets.length, tickets: ticketsWithMessages, coverage });
+  } catch (error) {
+    sendJson(response, 500, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
