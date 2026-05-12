@@ -1,0 +1,46 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/web/activity"
+  to = "/.netlify/functions/web-activity"
+  status = 200
+
+[[redirects]]
+  from = "/api/web/group-stats"
+  to = "/.netlify/functions/web-group-stats"
+  status = 200
+
+[[redirects]]
+  from = "/api/web/members"
+  to = "/.netlify/functions/web-members"
+  status = 200
+
+[[redirects]]
+  from = "/api/web/proof-submissions"
+  to = "/.netlify/functions/web-proof-submissions"
+  status = 200
+
+[[redirects]]
+  from = "/api/web/support-tickets"
+  to = "/.netlify/functions/web-support-tickets"
+  status = 200
+
+[[redirects]]
+  from = "/api/telegram/webhook"
+  to = "/.netlify/functions/telegram-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/cron/timekeeping"
+  to = "/.netlify/functions/cron-timekeeping"
+  status = 200
+
+[[redirects]]
+  from = "/api/cron/daily-report"
+  to = "/.netlify/functions/cron-daily-report"
+  status = 200

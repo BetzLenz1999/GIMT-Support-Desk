@@ -66,6 +66,20 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET"}'
 ```
 
+
+### Netlify dashboard API routes
+
+On Vercel, files under [`api/`](api) become serverless routes automatically. Netlify does not serve Vercel-style `api/` files directly, so this repository includes [`netlify.toml`](netlify.toml) redirects plus thin wrappers under [`netlify/functions/`](netlify/functions) that forward Netlify Function events to the same API handlers used by Vercel.
+
+If the dashboard loads on Netlify but a table shows an error such as `Failed to load: /api/web/activity?limit=200 → 404`, the static files deployed but the Netlify functions/redirects were not included in that deploy.
+
+Netlify fix checklist:
+
+1. Set the Netlify site base directory to the repository root, not `public/`.
+2. Let Netlify use this repo's `netlify.toml`; it sets `publish = "public"` and `functions = "netlify/functions"`.
+3. Add the same environment variables in Netlify that you use in Vercel (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, Telegram secrets, and optional group/cron variables).
+4. Redeploy the latest commit, then open `https://YOUR-NETLIFY-SITE.netlify.app/api/web/activity?limit=1`; it should return JSON.
+
 ## Bot workflow
 
 1. User sends `/start`.
@@ -81,7 +95,7 @@ The primary UX is buttons. `/start`, `/menu`, and `/help` are kept only as fallb
 
 ## Web dashboard
 
-The dashboard lives in the [`public/`](public) folder and is served by Vercel as a static site at the deployment root URL. It calls these read-only JSON endpoints under [`api/web/`](api/web):
+The dashboard lives in the [`public/`](public) folder and is served as a static site at the deployment root URL. It calls these read-only JSON endpoints under [`api/web/`](api/web):
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -98,6 +112,8 @@ Vercel cron runs:
 
 - `/api/cron/timekeeping` every 5 minutes for reminders and late/missing-time-out alerts.
 - `/api/cron/daily-report` daily at 01:05 UTC to store a daily summary in activity logs.
+
+On Netlify, configure scheduled calls to the same URLs (`/api/cron/timekeeping` and `/api/cron/daily-report`) with your preferred scheduler, or migrate these wrappers to Netlify Scheduled Functions if you want Netlify to own the schedule.
 
 Both endpoints accept either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET` when `CRON_SECRET` is configured.
 
