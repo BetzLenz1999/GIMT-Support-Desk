@@ -20,6 +20,8 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
+    const startedAt = new Date();
+    console.log(`[cron-daily-report] started at ${startedAt.toISOString()}`);
     const db = getSupabase();
     const report = await buildDailyReport(db);
     await createActivity(db, {
@@ -30,7 +32,8 @@ export default async function handler(request: any, response: any) {
       message: report,
       metadata: {}
     });
-    sendJson(response, 200, { ok: true, report });
+    console.log("[cron-daily-report] completed");
+    sendJson(response, 200, { ok: true, ranAt: startedAt.toISOString(), report });
   } catch (error) {
     console.error(error);
     sendJson(response, 500, { ok: false, error: "Daily report failed" });

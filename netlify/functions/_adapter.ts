@@ -13,11 +13,26 @@ type NetlifyEvent = {
   rawUrl?: string;
 };
 
+function hasScheduledPayload(event: NetlifyEvent): boolean {
+  if (!event.body) return false;
+
+  try {
+    const rawBody = event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
+    const payload = JSON.parse(rawBody) as { next_run?: unknown };
+    return typeof payload.next_run === "string";
+  } catch {
+    return false;
+  }
+}
+
 function isScheduledInvocation(event: NetlifyEvent): boolean {
   if (event.isScheduled === true) return true;
-  const headers = event.headers ?? {};
-  const userAgent = headers["user-agent"] ?? headers["User-Agent"];
-  return typeof userAgent === "string" && /netlify.*cron/i.test(userAgent);
+
+  const headers = normalizeHeaders(event.headers);
+  const userAgent = headers["user-agent"];
+  if (typeof userAgent === "string" && /netlify.*cron/i.test(userAgent)) return true;
+
+  return hasScheduledPayload(event);
 }
 
 function normalizeHeaders(headers: Record<string, string | undefined> = {}): Record<string, string> {
