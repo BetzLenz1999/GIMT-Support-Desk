@@ -86,7 +86,7 @@ Netlify fix checklist:
 2. Bot saves Telegram user/chat metadata and asks the user to select their name using buttons.
 3. User sees the dashboard with UTC and local shift time.
 4. User taps buttons for Time In, Time Out, Activity, Excuse, Absent, Shift Swap, Submit Proof, or Refresh.
-5. Vercel cron routes send private shift reminders using the saved personal chat IDs and, when `TEAM_GROUP_CHAT_ID` is configured, matching team-wide warnings, including 1-hour Time In reminders, 1-hour proof-of-work reminders, and Time Out reminders, to the group.
+5. Vercel cron routes send private shift reminders using the saved personal chat IDs and, when `TEAM_GROUP_CHAT_ID` is configured, matching team-wide warnings, including 1-hour and 10-minute Time In reminders, shift-start reminders, 1-hour proof-of-work reminders, 10-minute Time Out reminders, shift-end reminders, and missing-Time-Out alerts. Proof-of-work reminders are sent only while the member has an active Time In and has not timed out, and proof submission closes after the scheduled Time Out.
 6. When `TEAM_GROUP_CHAT_ID` is configured, the bot also broadcasts each completed DM action (Time In, Time Out, Proof of Work, Excuse, Absent, Shift Swap requests and responses) to the team group so everyone can see attendance status in real time.
 7. Group prompts with "Time In Now", "Time Out Now", or "Submit Proof of Work" buttons are tracked by `public.group_action_messages`. As soon as the assigned member completes the action (from either the DM dashboard or the group button), the bot automatically deletes the stale prompts in the group and posts a single unified success summary. The success summary is short-lived: every 5 minutes the timekeeping cron sweeps and removes acknowledgements older than 5 minutes so the group stays uncluttered.
 8. When a member who is not the scheduled owner taps a group action button, the bot replies with a Telegram callback alert popup (visible only to that user) instead of posting a noisy "Only X can press this button." line to the group.
@@ -128,7 +128,7 @@ To get `TEAM_GROUP_CHAT_ID`:
 5. Add the primary notification group value as `TEAM_GROUP_CHAT_ID` in your Vercel environment variables and redeploy.
 6. If you want stats for multiple groups, add every stats group ID to `TEAM_STATS_GROUP_CHAT_IDS`, separated by commas or spaces. Example: `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`.
 
-After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 10 minutes before a member's shift starts, when the shift starts, when a member is late, 1 hour before a member's shift ends for proof-of-work submission, before a member's shift ends, when the shift ends, and when a member is missing Time Out. The Time In button also posts a group warning when an early Time In attempt is blocked.
+After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 10 minutes before a member's shift starts, when the shift starts, when a member is late, 1 hour before a member's shift ends for proof-of-work submission, 10 minutes before a member's shift ends for Time Out, when the shift ends, and when a member is missing Time Out. The Time In button also posts a group warning when an early Time In attempt is blocked.
 
 ### Timekeeping cron schedule
 
@@ -213,12 +213,14 @@ Behavior:
 
 ## Proof of work reminders
 
-The timekeeping cron sends proof-of-work reminders exactly 1 hour before each member's scheduled out time, within the existing 5-minute cron window. The reminder is sent to the member's personal Telegram chat and, when `TEAM_GROUP_CHAT_ID` is configured, to the team group.
+The timekeeping cron sends proof-of-work reminders 1 hour before each member's scheduled out time, within the existing 5-minute cron window, but only when that member is already timed in and has not timed out. The reminder is sent to the member's personal Telegram chat and, when `TEAM_GROUP_CHAT_ID` is configured, to the team group.
 
 Reminder text:
 
 ```text
 Hi Betz, please attach your proof of work here before your work time ends. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.
+
+⚠️ Important: proof submission only works while you are actively timed in. It closes after your scheduled Time Out.
 ```
 
-Team members can tap **Submit Proof of Work** from the reminder or **Submit Proof** from the dashboard. Any non-empty text is accepted and saved to `proof_of_work_submissions`; sent reminder tracking is saved to `proof_of_work_reminders`. Submissions made after the scheduled out time are stored with `status = 'late'`.
+Team members can tap **Submit Proof of Work** from the reminder or **Submit Proof** from the dashboard. Any non-empty text is accepted and saved to `proof_of_work_submissions` only while the member has an active Time In, has not timed out, and is still before the scheduled out time; sent reminder tracking is saved to `proof_of_work_reminders`. Late proof submission is blocked instead of being stored after the scheduled out time.

@@ -1093,11 +1093,20 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
   }
 
   if (data === "proof:start") {
-    await setConversationState(db, callback.from.id, "awaiting_proof_of_work");
+    const proofEligibility = await getProofSubmissionEligibility(db, registration.member_id);
+    if (!proofEligibility.allowed) {
+      await clearConversationState(db, callback.from.id);
+      await editMessageText(chatId, messageId, proofEligibility.message, { replyMarkup: dashboardKeyboard() });
+      return;
+    }
+
+    await setConversationState(db, callback.from.id, "awaiting_proof_of_work", {
+      workDateUtc: proofEligibility.window.workDateUtc
+    });
     await editMessageText(
       chatId,
       messageId,
-      "Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot links, or any valid non-empty text are accepted.",
+      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot links, or any valid non-empty text are accepted.\n\nDeadline: ${formatUtc(proofEligibility.window.end)} UTC. Proof submission closes after your scheduled Time Out.`,
       { replyMarkup: homeKeyboard() }
     );
     return;
@@ -1177,10 +1186,15 @@ async function handleStatefulReply(
   await clearConversationState(db, user.id);
 
   if (state === "awaiting_proof_of_work") {
-    const member = getTeamMember(registration.member_id)!;
     const now = new Date();
-    const window = getProofSubmissionShiftWindow(member, now);
-    const status = now.getTime() <= window.end.getTime() ? "submitted" : "late";
+    const proofEligibility = await getProofSubmissionEligibility(db, registration.member_id, now);
+    if (!proofEligibility.allowed) {
+      await sendMessage(message.chat.id, proofEligibility.message, { replyMarkup: dashboardKeyboard() });
+      return;
+    }
+
+    const window = proofEligibility.window;
+    const status: string = "submitted";
     const proofType = getProofType(reason);
 
     await createProofOfWorkSubmission(db, {
@@ -1209,7 +1223,7 @@ async function handleStatefulReply(
 
     await sendMessage(
       message.chat.id,
-      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: ${status === "late" ? "Late" : "Submitted"}\nType: ${proofType}`,
+      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: Submitted\nType: ${proofType}`,
       { replyMarkup: dashboardKeyboard() }
     );
 
@@ -1337,6 +1351,55 @@ async function handleStatefulReply(
       { parseMode: "HTML" }
     );
   }
+}
+
+
+type ProofSubmissionEligibility =
+  | { allowed: true; window: ReturnType<typeof getProofSubmissionShiftWindow> }
+  | { allowed: false; message: string };
+
+async function getProofSubmissionEligibility(
+  db: SupabaseRestClient,
+  memberId: string,
+  now = new Date()
+): Promise<ProofSubmissionEligibility> {
+  const member = getTeamMember(memberId);
+  if (!member) {
+    return { allowed: false, message: "Your team profile was not found. Please contact the admin." };
+  }
+
+  const window = getProofSubmissionShiftWindow(member, now);
+  const log = await findTimeLog(db, member.id, window.workDateUtc);
+
+  if (now.getTime() < window.start.getTime()) {
+    return {
+      allowed: false,
+      message: `📎 Proof of Work is not open yet. Please Time In first when your shift starts.\n\nShift Start: ${formatUtc(window.start)} UTC\nScheduled Out: ${formatUtc(window.end)} UTC`
+    };
+  }
+
+  if (!log?.actual_in_utc) {
+    return {
+      allowed: false,
+      message: `📎 Proof of Work is only available after you Time In for your active shift. Please Time In first.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
+    };
+  }
+
+  if (log.actual_out_utc) {
+    return {
+      allowed: false,
+      message: `📎 Proof of Work submission is already closed because you have already timed out for this shift.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
+    };
+  }
+
+  if (now.getTime() > window.end.getTime()) {
+    return {
+      allowed: false,
+      message: `📎 Proof of Work submission is closed. Proof must be submitted before your scheduled Time Out.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
+    };
+  }
+
+  return { allowed: true, window };
 }
 
 function getProofSubmissionShiftWindow(member: NonNullable<ReturnType<typeof getTeamMember>>, now: Date) {
