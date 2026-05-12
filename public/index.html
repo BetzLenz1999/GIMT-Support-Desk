@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <title>Working Management — Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%8F%B1%EF%B8%8F%3C/text%3E%3C/svg%3E" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
-        darkMode: "media",
+        darkMode: "class",
         theme: {
           extend: {
             fontFamily: {
@@ -31,9 +31,9 @@
       [data-tab-panel] { display: none; }
       [data-tab-panel].active { display: block; }
       .welcome-card {
-        border: 1px solid rgb(203 213 225);
-        background: linear-gradient(135deg, white, rgb(248 250 252));
-        box-shadow: 0 18px 42px rgba(15 23 42 / 0.08);
+        border: 1px solid rgb(153 246 228);
+        background: linear-gradient(135deg, white 0%, rgb(240 253 250) 55%, rgb(236 254 255) 100%);
+        box-shadow: 0 18px 42px rgba(15 118 110 / 0.14);
       }
       .dark .welcome-card {
         border-color: rgb(51 65 85);
@@ -373,7 +373,7 @@
               WELCOME TO GOODDOLLAR INTERNATIONAL MODERATION TEAM 2024–2026
             </h2>
             <p class="mt-4 text-sm sm:text-base text-slate-600 dark:text-slate-300">
-              Piliin ang menu sa ibaba para makita ang Activity History, Stats, Proof of Work, o Support Tickets. Walang table/content na lalabas hanggang pumili ka.
+              Select a menu below to view Activity History, Stats, Proof of Work, or Support Tickets. Dashboard content stays hidden until you choose a section.
             </p>
           </div>
         </div>
