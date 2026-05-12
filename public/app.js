@@ -152,7 +152,12 @@ function renderStatsGroupFilter(groups) {
 
 async function fetchJson(path) {
   const r = await fetch(path, { headers: { accept: "application/json" } });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) {
+    const deployHint = r.status === 404 && path.startsWith("/api/")
+      ? " (API route not found. On Netlify, make sure netlify.toml and netlify/functions are deployed from the repository root; on Vercel, make sure the /api folder is included.)"
+      : "";
+    throw new Error(`${path} → ${r.status}${deployHint}`);
+  }
   const body = await r.json();
   if (body && body.ok === false) throw new Error(body.error || "Request failed");
   return body;
@@ -395,7 +400,7 @@ function renderActivity() {
 }
 
 async function loadActivity() {
-  const qs = new URLSearchParams({ limit: "500" });
+  const qs = new URLSearchParams({ limit: "200" });
   $("#activity-body").innerHTML = '<tr><td colspan="4" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Loading…</td></tr>';
   $("#activity-past").innerHTML = "";
   try {
