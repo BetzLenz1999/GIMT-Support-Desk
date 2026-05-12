@@ -126,9 +126,16 @@ Late By: ${formatDuration(minutesSinceStart)}
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "shift_end", `🔴 Shift Ended: ${mention}\n\nPlease make sure ${mention} times out.\nScheduled Out: ${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.end, member.timezone)}${nextLine}\n\n👇 Tap below to Time Out, or open my DM.`, groupTimeOutKeyboard(member.id), "time_out");
     }
 
-    if (log?.actual_in_utc && !log.actual_out_utc && isDueAfter(minutesSinceEnd, MISSING_OUT_AFTER_MINUTES)) {
-      sent += await sendOnce(db, registration, window.workDateUtc, "missing_out", `⚠️ Missing Time Out\n\nYou have not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC`);
-      groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "missing_out", `⚠️ Team Missing Time Out\n\n${mention} has not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC\n\n👇 Tap below to Time Out, or open my DM.`, groupTimeOutKeyboard(member.id), "time_out");
+    if (!hasTimedOut && isDueAfter(minutesSinceEnd, MISSING_OUT_AFTER_MINUTES)) {
+      const missingOutPersonalMessage = hasTimedIn
+        ? `⚠️ Missing Time Out\n\nYou have not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC`
+        : `⚠️ Missing Time Out\n\nNo Time In or Time Out is recorded for this shift yet. Please open the bot and update your attendance.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC`;
+      const missingOutGroupMessage = hasTimedIn
+        ? `⚠️ Team Missing Time Out\n\n${mention} has not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC\n\n👇 Tap below to Time Out, or open my DM.`
+        : `⚠️ Team Missing Time Out\n\n${mention} has no Time In or Time Out recorded for this shift yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC\n\n👇 Tap below to Time Out, or open my DM.`;
+
+      sent += await sendOnce(db, registration, window.workDateUtc, "missing_out", missingOutPersonalMessage);
+      groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "missing_out", missingOutGroupMessage, groupTimeOutKeyboard(member.id), "time_out");
     }
   }
 
@@ -172,7 +179,15 @@ async function sendOnce(
   const eventKey = `${registration.member_id}:${workDateUtc}:${eventType}`;
   if (await hasCronEvent(db, eventKey)) return 0;
 
-  await sendMessage(registration.telegram_chat_id, message);
+  try {
+    await sendMessage(registration.telegram_chat_id, message);
+  } catch (error) {
+    console.error(
+      `Failed to send personal reminder ${eventKey} to chat ${registration.telegram_chat_id}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return 0;
+  }
+
   await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, eventType);
   return 1;
 }
@@ -226,7 +241,30 @@ async function sendProofOfWorkOnce(
   const eventKey = `${registration.member_id}:${workDateUtc}:${eventType}`;
   if (await hasCronEvent(db, eventKey)) return 0;
 
-  await sendMessage(registration.telegram_chat_id, message, { replyMarkup: proofOfWorkKeyboard() });
+  const sendAtUtc = new Date(scheduledOutUtc.getTime() - PROOF_OF_WORK_REMINDER_MINUTES * 60_000).toISOString();
+
+  try {
+    await sendMessage(registration.telegram_chat_id, message, { replyMarkup: proofOfWorkKeyboard() });
+  } catch (error) {
+    console.error(
+      `Failed to send personal proof-of-work reminder ${eventKey} to chat ${registration.telegram_chat_id}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    await upsertProofOfWorkReminder(db, {
+      member_id: registration.member_id,
+      member_name: registration.member_name,
+      telegram_user_id: registration.telegram_user_id,
+      work_date_utc: workDateUtc,
+      scheduled_out_utc: scheduledOutUtc.toISOString(),
+      send_at_utc: sendAtUtc,
+      sent_at_utc: null,
+      channel,
+      message,
+      status: "failed",
+      submitted_at_utc: null
+    });
+    return 0;
+  }
+
   await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, eventType);
   await upsertProofOfWorkReminder(db, {
     member_id: registration.member_id,
@@ -234,7 +272,7 @@ async function sendProofOfWorkOnce(
     telegram_user_id: registration.telegram_user_id,
     work_date_utc: workDateUtc,
     scheduled_out_utc: scheduledOutUtc.toISOString(),
-    send_at_utc: new Date(scheduledOutUtc.getTime() - PROOF_OF_WORK_REMINDER_MINUTES * 60_000).toISOString(),
+    send_at_utc: sendAtUtc,
     sent_at_utc: now.toISOString(),
     channel,
     message,
@@ -256,8 +294,24 @@ async function sendProofOfWorkGroupOnce(
   const eventKey = `group:${registration.member_id}:${workDateUtc}:proof_of_work_1h`;
   if (await hasCronEvent(db, eventKey)) return 0;
 
+  const sendAtUtc = new Date(scheduledOutUtc.getTime() - PROOF_OF_WORK_REMINDER_MINUTES * 60_000).toISOString();
   const sent = await sendTeamGroupMessageWithResult(`👥 Proof of Work Reminder\n\n${message}`, { replyMarkup: groupProofOfWorkKeyboard(), parseMode: "HTML" });
-  if (!sent) return 0;
+  if (!sent) {
+    await upsertProofOfWorkReminder(db, {
+      member_id: registration.member_id,
+      member_name: registration.member_name,
+      telegram_user_id: registration.telegram_user_id,
+      work_date_utc: workDateUtc,
+      scheduled_out_utc: scheduledOutUtc.toISOString(),
+      send_at_utc: sendAtUtc,
+      sent_at_utc: null,
+      channel: "group",
+      message,
+      status: "failed",
+      submitted_at_utc: null
+    });
+    return 0;
+  }
 
   await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, eventType);
 
@@ -275,7 +329,7 @@ async function sendProofOfWorkGroupOnce(
     telegram_user_id: registration.telegram_user_id,
     work_date_utc: workDateUtc,
     scheduled_out_utc: scheduledOutUtc.toISOString(),
-    send_at_utc: new Date(scheduledOutUtc.getTime() - PROOF_OF_WORK_REMINDER_MINUTES * 60_000).toISOString(),
+    send_at_utc: sendAtUtc,
     sent_at_utc: now.toISOString(),
     channel: "group",
     message,
