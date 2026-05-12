@@ -6,11 +6,19 @@ type NetlifyEvent = {
   headers?: Record<string, string | undefined>;
   httpMethod?: string;
   isBase64Encoded?: boolean;
+  isScheduled?: boolean;
   path?: string;
   queryStringParameters?: Record<string, string | undefined> | null;
   rawQuery?: string;
   rawUrl?: string;
 };
+
+function isScheduledInvocation(event: NetlifyEvent): boolean {
+  if (event.isScheduled === true) return true;
+  const headers = event.headers ?? {};
+  const userAgent = headers["user-agent"] ?? headers["User-Agent"];
+  return typeof userAgent === "string" && /netlify.*cron/i.test(userAgent);
+}
 
 function normalizeHeaders(headers: Record<string, string | undefined> = {}): Record<string, string> {
   const normalized: Record<string, string> = {};
@@ -73,6 +81,14 @@ function createVercelStyleResponse() {
 export function createNetlifyHandler(vercelHandler: VercelStyleHandler) {
   return async (event: NetlifyEvent) => {
     const request = createVercelStyleRequest(event);
+
+    if (isScheduledInvocation(event)) {
+      const cronSecret = process.env.CRON_SECRET;
+      if (cronSecret && !request.headers.authorization) {
+        request.headers.authorization = `Bearer ${cronSecret}`;
+      }
+    }
+
     const response = createVercelStyleResponse();
 
     await vercelHandler(request, response);

@@ -6,7 +6,7 @@
   node_bundler = "esbuild"
 
 [functions."cron-timekeeping"]
-  schedule = "*/5 * * * *"
+  schedule = "* * * * *"
 
 [functions."cron-daily-report"]
   schedule = "5 1 * * *"
