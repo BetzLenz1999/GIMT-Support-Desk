@@ -61,7 +61,6 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   const command = getCommand(text);
 
   if (message.new_chat_members?.some((member) => member.is_bot)) {
-    await sendMessage(message.chat.id, buildChatIdText(message.chat));
     return;
   }
 
@@ -71,7 +70,7 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   }
 
   if (isGroupChat(message.chat) && (command === "/start" || command === "/menu" || command === "/help")) {
-    await sendMessage(message.chat.id, `${buildChatIdText(message.chat)}\n\nAdd this value as TEAM_GROUP_CHAT_ID in Vercel to enable group notifications.`);
+    await sendMessage(message.chat.id, buildChatIdText(message.chat));
     return;
   }
 
@@ -232,7 +231,6 @@ async function handleBotChatMemberUpdate(db: SupabaseRestClient, update: Telegra
     await rememberTeamGroupChatId(db, update.chat.id, { force: true });
   }
 
-  await sendMessage(update.chat.id, `${buildChatIdText(update.chat)}\n\nAdd this value as TEAM_GROUP_CHAT_ID in Vercel to enable group notifications, or include it in TEAM_STATS_GROUP_CHAT_IDS to track this group's public stats.`);
 }
 
 async function rememberTelegramGroup(db: SupabaseRestClient, chat: TelegramChat): Promise<void> {

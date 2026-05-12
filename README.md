@@ -46,7 +46,7 @@ No Telegram personal chat ID environment variable is required. The bot saves eac
 
 Changing `TEAM_GROUP_CHAT_ID` or adding IDs to `TEAM_STATS_GROUP_CHAT_IDS` does not reset Time In, Time Out, Activity History, or Proof of Work submissions. Those records stay member-based; only public message stats are separated by Telegram group chat ID.
 
-If `TEAM_GROUP_CHAT_ID` is not set or its value is wrong, the bot also keeps a stored fallback chat ID in `public.app_settings` (key `team_group_chat_id`). The fallback is populated automatically the first time the bot is added to a group (via the `my_chat_member` event) or, when no primary env var is set, the first time a registered member sends any message in a counted group. When `sendTeamGroupMessage` cannot post to the env-var chat (or no env var is set), it transparently retries against the stored fallback and logs a clear warning telling the operator which value to put in Vercel.
+If `TEAM_GROUP_CHAT_ID` is not set or its value is wrong, the bot also keeps a stored fallback chat ID in `public.app_settings` (key `team_group_chat_id`). The fallback is populated silently the first time the bot is added to a group (via the `my_chat_member` event) or, when no primary env var is set, the first time a registered member sends any message in a counted group. When `sendTeamGroupMessage` cannot post to the env-var chat (or no env var is set), it transparently retries against the stored fallback and logs a clear warning telling the operator which value to put in Vercel.
 
 ## Supabase setup
 
@@ -121,9 +121,9 @@ Both endpoints accept either `Authorization: Bearer $CRON_SECRET` or `?secret=$C
 
 To get `TEAM_GROUP_CHAT_ID`:
 
-1. Deploy the latest bot code first, then add the bot to your Telegram group. When Telegram sends the bot-added event, the bot replies with the group `Chat ID` automatically.
+1. Deploy the latest bot code first, then add the bot to your Telegram group.
 2. If you need to request it manually, send `/chatid@YourBotUsername` in the group. The aliases `/id@YourBotUsername`, `/groupid@YourBotUsername`, and `/start@YourBotUsername` also reply with the same chat ID.
-3. If the bot was already in the group before this code was deployed, remove it from the group, add it again, then try `/chatid@YourBotUsername`.
+3. If the bot was already in the group before this code was deployed, send `/chatid@YourBotUsername`.
 4. Copy the `Chat ID` value from the bot reply. Group IDs are usually negative, for example `-1001234567890`.
 5. Add the primary notification group value as `TEAM_GROUP_CHAT_ID` in your Vercel environment variables and redeploy.
 6. If you want stats for multiple groups, add every stats group ID to `TEAM_STATS_GROUP_CHAT_IDS`, separated by commas or spaces. Example: `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`.
@@ -147,7 +147,7 @@ TEAM_GROUP_CHAT_ID=-1001111111111
 TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222,-1003333333333
 ```
 
-In this example, reminders go to `-1001111111111`, while the dashboard can show separate stats for all three groups. The bot saves group titles from Telegram automatically when it is added to a group or receives a registered member's message there, so the Stats tab can display actual group names.
+In this example, reminders go to `-1001111111111`, while the dashboard can show separate stats for all three groups. The bot saves group titles from Telegram silently when it is added to a group or receives a registered member's message there, so the Stats tab can display actual group names.
 
 Historical attendance data is not tied to these group IDs. You can move the primary notification group later by changing `TEAM_GROUP_CHAT_ID`; existing Time In, Time Out, Activity History, and Proof of Work rows remain unchanged. New message stats continue under the group chat ID where each message was sent.
 
