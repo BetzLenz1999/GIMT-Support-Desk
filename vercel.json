@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/timekeeping",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/daily-report",
