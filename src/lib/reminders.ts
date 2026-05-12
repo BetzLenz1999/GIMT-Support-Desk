@@ -23,13 +23,20 @@ function buildNextUpLine(currentMemberId: string, registrations: Registration[])
   return `\n\n🔁 Up next: ${nextDisplay} — please prepare to Time In.`;
 }
 
-const REMINDER_WINDOW_MINUTES = 5;
 const PRE_SHIFT_ONE_HOUR_MINUTES = 60;
 const PRE_SHIFT_MINUTES = 10;
 const PRE_OUT_MINUTES = 10;
 const PROOF_OF_WORK_REMINDER_MINUTES = 60;
 const LATE_AFTER_MINUTES = 5;
 const MISSING_OUT_AFTER_MINUTES = 5;
+
+function isDueBetween(minutesUntilTarget: number, startMinutesBefore: number, stopMinutesBefore: number): boolean {
+  return minutesUntilTarget <= startMinutesBefore && minutesUntilTarget > stopMinutesBefore;
+}
+
+function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): boolean {
+  return minutesSinceTarget >= startMinutesAfter;
+}
 
 export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; sweptExpired: number }> {
   let sent = 0;
@@ -52,26 +59,31 @@ export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date(
 
     const mention = buildMention(registration);
 
-    if (!hasTimedIn && minutesUntilStart <= PRE_SHIFT_ONE_HOUR_MINUTES && minutesUntilStart > PRE_SHIFT_ONE_HOUR_MINUTES - REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedIn && isDueBetween(minutesUntilStart, PRE_SHIFT_ONE_HOUR_MINUTES, PRE_SHIFT_MINUTES)) {
       const startsIn = formatDuration(minutesBetween(now, window.start));
       sent += await sendOnce(db, registration, window.workDateUtc, "pre_shift_1h", `⏰ Reminder: your shift starts in ${startsIn}.\n\nShift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_shift_1h", `👥 Team Time In Reminder\n\n${mention}'s shift starts in ${startsIn}.\nShift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`);
     }
 
-    if (!hasTimedIn && minutesUntilStart <= PRE_SHIFT_MINUTES && minutesUntilStart > PRE_SHIFT_MINUTES - REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedIn && isDueBetween(minutesUntilStart, PRE_SHIFT_MINUTES, 0)) {
       const startsIn = formatDuration(minutesBetween(now, window.start));
       sent += await sendOnce(db, registration, window.workDateUtc, "pre_shift", `⏰ Reminder: your shift starts in ${startsIn}.\n\nShift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_shift", `👥 Team Reminder\n\n${mention}'s shift starts in ${startsIn}.\nShift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}\n\n👇 Tap below to Time In, or open my DM.`, groupTimeInKeyboard(member.id), "time_in");
     }
 
-    if (!hasTimedIn && minutesSinceStart >= 0 && minutesSinceStart < REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedIn && minutesSinceStart >= 0 && minutesSinceStart < LATE_AFTER_MINUTES) {
       sent += await sendOnce(db, registration, window.workDateUtc, "shift_start", `🟢 Shift Started\n\nPlease Time In now.\nUTC: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "shift_start", `🟢 Shift Started: ${mention}\n\nPlease make sure coverage is active.\nUTC: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}\n\n👇 Tap below to Time In, or open my DM.`, groupTimeInKeyboard(member.id), "time_in");
     }
 
-    if (!log?.actual_in_utc && minutesSinceStart >= LATE_AFTER_MINUTES && minutesSinceStart < LATE_AFTER_MINUTES + REMINDER_WINDOW_MINUTES) {
-      sent += await sendOnce(db, registration, window.workDateUtc, "late_warning", `⚠️ Late Alert\n\nYou have not timed in yet.\nScheduled In: ${formatUtc(window.start)} UTC\nCurrent: ${formatUtc(now)} UTC\nLate By: ${formatDuration(minutesSinceStart)}`);
-      groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "late_warning", `⚠️ Team Late Alert
+    if (!log?.actual_in_utc && isDueAfter(minutesSinceStart, LATE_AFTER_MINUTES)) {
+      const latePersonalSent = await sendOnce(db, registration, window.workDateUtc, "late_warning", `⚠️ Late Alert
+
+You have not timed in yet.
+Scheduled In: ${formatUtc(window.start)} UTC
+Current: ${formatUtc(now)} UTC
+Late By: ${formatDuration(minutesSinceStart)}`);
+      const lateGroupSent = await sendGroupOnce(db, member.id, window.workDateUtc, "late_warning", `⚠️ Team Late Alert
 
 ${mention} has not timed in yet.
 Scheduled In: ${formatUtc(window.start)} UTC
@@ -79,37 +91,42 @@ Current: ${formatUtc(now)} UTC
 Late By: ${formatDuration(minutesSinceStart)}
 
 👇 Tap below to Time In, or open my DM.`, groupTimeInKeyboard(member.id), "time_in");
-      await createActivity(db, {
-        member_id: member.id,
-        member_name: member.name,
-        telegram_user_id: registration.telegram_user_id,
-        action: "LATE_ALERT",
-        message: `${member.name} has not timed in. Late by ${formatDuration(minutesSinceStart)}.`,
-        metadata: { minutesSinceStart }
-      });
+      sent += latePersonalSent;
+      groupSent += lateGroupSent;
+
+      if (latePersonalSent > 0 || lateGroupSent > 0) {
+        await createActivity(db, {
+          member_id: member.id,
+          member_name: member.name,
+          telegram_user_id: registration.telegram_user_id,
+          action: "LATE_ALERT",
+          message: `${member.name} has not timed in. Late by ${formatDuration(minutesSinceStart)}.`,
+          metadata: { minutesSinceStart }
+        });
+      }
     }
 
-    if (!hasTimedOut && minutesUntilEnd <= PROOF_OF_WORK_REMINDER_MINUTES && minutesUntilEnd > PROOF_OF_WORK_REMINDER_MINUTES - REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
       const personalProofMessage = buildProofOfWorkReminderMessage(member.name, window.end, member.timezone);
       const groupProofMessage = buildProofOfWorkReminderMessage(mention, window.end, member.timezone);
       sent += await sendProofOfWorkOnce(db, registration, window.workDateUtc, window.end, now, "personal", personalProofMessage);
       groupSent += await sendProofOfWorkGroupOnce(db, registration, window.workDateUtc, window.end, now, groupProofMessage);
     }
 
-    if (!hasTimedOut && minutesUntilEnd <= PRE_OUT_MINUTES && minutesUntilEnd > PRE_OUT_MINUTES - REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedOut && isDueBetween(minutesUntilEnd, PRE_OUT_MINUTES, 0)) {
       const endsIn = formatDuration(minutesBetween(now, window.end));
       const nextLine = buildNextUpLine(member.id, registrations);
       sent += await sendOnce(db, registration, window.workDateUtc, "pre_out", `⏰ Shift ending soon.\n\nScheduled Out: ${formatUtc(window.end)} UTC\nPlease prepare to Time Out.`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_out", `👥 Team Time Out Reminder\n\n${mention}'s shift ends in ${endsIn}.\nScheduled Out: ${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.end, member.timezone)}${nextLine}\n\n👇 Tap below to Time Out, or open my DM.`, groupTimeOutKeyboard(member.id), "time_out");
     }
 
-    if (!hasTimedOut && minutesSinceEnd >= 0 && minutesSinceEnd < REMINDER_WINDOW_MINUTES) {
+    if (!hasTimedOut && minutesSinceEnd >= 0 && minutesSinceEnd < MISSING_OUT_AFTER_MINUTES) {
       const nextLine = buildNextUpLine(member.id, registrations);
       sent += await sendOnce(db, registration, window.workDateUtc, "shift_end", `🔴 Shift Ended\n\nPlease Time Out now.\nUTC: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "shift_end", `🔴 Shift Ended: ${mention}\n\nPlease make sure ${mention} times out.\nScheduled Out: ${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.end, member.timezone)}${nextLine}\n\n👇 Tap below to Time Out, or open my DM.`, groupTimeOutKeyboard(member.id), "time_out");
     }
 
-    if (log?.actual_in_utc && !log.actual_out_utc && minutesSinceEnd >= MISSING_OUT_AFTER_MINUTES && minutesSinceEnd < MISSING_OUT_AFTER_MINUTES + REMINDER_WINDOW_MINUTES) {
+    if (log?.actual_in_utc && !log.actual_out_utc && isDueAfter(minutesSinceEnd, MISSING_OUT_AFTER_MINUTES)) {
       sent += await sendOnce(db, registration, window.workDateUtc, "missing_out", `⚠️ Missing Time Out\n\nYou have not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC`);
       groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "missing_out", `⚠️ Team Missing Time Out\n\n${mention} has not timed out yet.\nScheduled Out: ${formatUtc(window.end)} UTC\nCurrent: ${formatUtc(now)} UTC\n\n👇 Tap below to Time Out, or open my DM.`, groupTimeOutKeyboard(member.id), "time_out");
     }
