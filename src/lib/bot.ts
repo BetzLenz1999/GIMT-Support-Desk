@@ -12,6 +12,7 @@ import {
   findSupportTicketById,
   findTimeLog,
   listRecentBotSupportTicketMessages,
+  listRegistrations,
   getConversationState,
   getOrCreateTimeLog,
   incrementGroupMessageCount,
@@ -82,8 +83,20 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     const registration = await findRegistrationByUser(db, user.id);
 
     if (!registration) {
+      const registrations = await listRegistrations(db);
+      const registeredMemberIds = new Set(registrations.map((row) => row.member_id));
+      const availableMembers = TEAM_SCHEDULE.filter((member) => !registeredMemberIds.has(member.id));
+
+      if (availableMembers.length === 0) {
+        await sendMessage(
+          message.chat.id,
+          "Registration is already complete for all 5 team members (Betz, Omar, Moh, Pablo, and Dany). This bot is closed to new users. If you believe this is wrong, please contact the team admin."
+        );
+        return;
+      }
+
       await sendMessage(message.chat.id, "Welcome to Team Time Management Bot 👋\n\nPlease select your name:", {
-        replyMarkup: registrationKeyboard()
+        replyMarkup: registrationKeyboard(registeredMemberIds)
       });
       return;
     }
@@ -944,12 +957,13 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
     data.startsWith("group:time:in:") || data.startsWith("group:time:out:");
   const isTicketCallback = data.startsWith("t:");
   const isSupportConcernCallback = data.startsWith("s:concern:");
-  if (!isGroupActionCallback && !isTicketCallback && !isSupportConcernCallback) {
+  const isRegistrationCallback = data.startsWith("register:");
+  if (!isGroupActionCallback && !isTicketCallback && !isSupportConcernCallback && !isRegistrationCallback) {
     await answerCallbackQuery(callback.id);
   }
 
   if (!chatId || !messageId) {
-    if (isGroupActionCallback || isTicketCallback || isSupportConcernCallback) await answerCallbackQuery(callback.id);
+    if (isGroupActionCallback || isTicketCallback || isSupportConcernCallback || isRegistrationCallback) await answerCallbackQuery(callback.id);
     return;
   }
 
@@ -1005,8 +1019,35 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
 
   if (data.startsWith("register:")) {
     const member = getTeamMember(data.split(":")[1]);
-    if (!member) return;
+    if (!member) {
+      await answerCallbackQuery(callback.id);
+      return;
+    }
 
+    const existingRegistration = await findRegistrationByUser(db, callback.from.id);
+    if (existingRegistration) {
+      await answerCallbackQuery(
+        callback.id,
+        `You are already registered as ${existingRegistration.member_name}. Registration changes are locked.`,
+        { showAlert: true }
+      );
+      await editMessageText(chatId, messageId, await buildDashboardText(db, existingRegistration.member_id, callback.from.id), {
+        replyMarkup: dashboardKeyboard()
+      });
+      return;
+    }
+
+    const existingMemberRegistration = await findRegistrationByMemberId(db, member.id);
+    if (existingMemberRegistration) {
+      await answerCallbackQuery(
+        callback.id,
+        `${member.name} is already registered. Please choose your own unregistered name.`,
+        { showAlert: true }
+      );
+      return;
+    }
+
+    await answerCallbackQuery(callback.id);
     await upsertRegistration(db, callback.from, chatId, member);
     await createActivity(db, {
       member_id: member.id,
