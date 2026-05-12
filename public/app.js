@@ -45,7 +45,7 @@ const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const DOW_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const state = {
-  currentTab: "activity",
+  currentTab: "home",
   members: [],
   activity: {
     rows: [],
@@ -992,6 +992,7 @@ function switchTab(name) {
 
 function refreshCurrent() {
   setLastUpdated();
+  if (state.currentTab === "home") return;
   if (state.currentTab === "activity") loadActivity();
   else if (state.currentTab === "stats") loadStats();
   else if (state.currentTab === "proof") loadProof();
@@ -1034,6 +1035,9 @@ async function init() {
   // Tabs
   for (const btn of $all(".tab-btn")) {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  }
+  for (const btn of $all("[data-menu-tab]")) {
+    btn.addEventListener("click", () => switchTab(btn.dataset.menuTab));
   }
   $("#refresh-btn").addEventListener("click", refreshCurrent);
 
@@ -1116,7 +1120,7 @@ async function init() {
     if (e.key === "Escape" && state.memberDetail.open) closeMemberDetail();
   });
 
-  refreshCurrent();
+  switchTab("home");
   setInterval(refreshCurrent, 60_000);
 }
 
