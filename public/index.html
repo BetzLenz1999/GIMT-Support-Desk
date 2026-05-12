@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Working Management — Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%8F%B1%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "media",
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                "ui-sans-serif",
+                "system-ui",
+                "-apple-system",
+                "Segoe UI",
+                "Roboto",
+                "sans-serif"
+              ]
+            }
+          }
+        }
+      };
+    </script>
+    <style>
+      body { font-feature-settings: "ss01", "cv11"; }
+      [data-tab-panel] { display: none; }
+      [data-tab-panel].active { display: block; }
+      .tab-btn[aria-selected="true"] {
+        background-color: rgb(17 24 39);
+        color: white;
+        border-color: rgb(17 24 39);
+      }
+      .dark .tab-btn[aria-selected="true"] {
+        background-color: rgb(229 231 235);
+        color: rgb(17 24 39);
+        border-color: rgb(229 231 235);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 7px;
+        border-radius: 9999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+      }
+      .pill-green { background: rgb(220 252 231); color: rgb(22 101 52); }
+      .pill-red { background: rgb(254 226 226); color: rgb(153 27 27); }
+      .pill-yellow { background: rgb(254 249 195); color: rgb(133 77 14); }
+      .pill-slate { background: rgb(226 232 240); color: rgb(30 41 59); }
+      .pill-blue { background: rgb(219 234 254); color: rgb(30 64 175); }
+      .dark .pill-green { background: rgb(20 83 45); color: rgb(187 247 208); }
+      .dark .pill-red { background: rgb(127 29 29); color: rgb(254 202 202); }
+      .dark .pill-yellow { background: rgb(113 63 18); color: rgb(254 240 138); }
+      .dark .pill-slate { background: rgb(51 65 85); color: rgb(226 232 240); }
+      .dark .pill-blue { background: rgb(30 58 138); color: rgb(191 219 254); }
+
+      table.sheet {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+        font-size: 13px;
+      }
+      table.sheet thead th {
+        position: sticky;
+        top: 0;
+        background: rgb(241 245 249);
+        color: rgb(71 85 105);
+        font-weight: 600;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 6px 10px;
+        border-bottom: 1px solid rgb(203 213 225);
+        text-align: left;
+        cursor: pointer;
+        user-select: none;
+      }
+      table.sheet thead th .sort-indicator {
+        opacity: 0.5;
+        margin-left: 4px;
+        font-size: 10px;
+      }
+      table.sheet thead th[aria-sort="ascending"] .sort-indicator,
+      table.sheet thead th[aria-sort="descending"] .sort-indicator {
+        opacity: 1;
+      }
+      table.sheet tbody td {
+        padding: 6px 10px;
+        border-bottom: 1px solid rgb(241 245 249);
+        vertical-align: top;
+      }
+      table.sheet tbody tr:hover td {
+        background: rgb(248 250 252);
+      }
+      .dark table.sheet thead th {
+        background: rgb(15 23 42);
+        color: rgb(148 163 184);
+        border-bottom-color: rgb(51 65 85);
+      }
+      .dark table.sheet tbody td {
+        border-bottom-color: rgb(30 41 59);
+      }
+      .dark table.sheet tbody tr:hover td {
+        background: rgb(15 23 42);
+      }
+      .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+
+      #stats-group-date[aria-selected="true"],
+      #stats-group-member[aria-selected="true"] {
+        background-color: rgb(17 24 39);
+        color: white;
+      }
+      .dark #stats-group-date[aria-selected="true"],
+      .dark #stats-group-member[aria-selected="true"] {
+        background-color: rgb(229 231 235);
+        color: rgb(17 24 39);
+      }
+      #stats-group-date[aria-selected="false"],
+      #stats-group-member[aria-selected="false"] {
+        background-color: transparent;
+        color: rgb(71 85 105);
+      }
+      .dark #stats-group-date[aria-selected="false"],
+      .dark #stats-group-member[aria-selected="false"] {
+        color: rgb(148 163 184);
+      }
+
+      .stat-row { display: grid; grid-template-columns: 100px 1fr 50px 110px; align-items: center; gap: 8px; padding: 3px 4px; font-size: 13px; border-radius: 4px; }
+      .stat-row:hover { background: rgb(248 250 252); }
+      .dark .stat-row:hover { background: rgb(15 23 42); }
+      .stat-row.peak { background: rgba(254 243 199 / 0.4); }
+      .dark .stat-row.peak { background: rgba(113 63 18 / 0.25); }
+      .stat-bar { height: 8px; background: rgb(226 232 240); border-radius: 4px; overflow: hidden; }
+      .dark .stat-bar { background: rgb(30 41 59); }
+      .stat-bar-fill { height: 100%; background: rgb(71 85 105); transition: width 0.2s; }
+      .dark .stat-bar-fill { background: rgb(148 163 184); }
+      .stat-row.peak .stat-bar-fill { background: rgb(234 88 12); }
+      .dark .stat-row.peak .stat-bar-fill { background: rgb(251 146 60); }
+      .stat-row .stat-name { font-weight: 500; }
+      .stat-row .stat-count { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; text-align: right; }
+      .stat-row .stat-last { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: rgb(100 116 139); text-align: right; }
+      .dark .stat-row .stat-last { color: rgb(148 163 184); }
+      .peak-star { color: rgb(234 88 12); }
+      .dark .peak-star { color: rgb(251 146 60); }
+
+      .sparkline-row { display: grid; grid-template-columns: 130px 1fr 50px; align-items: center; gap: 8px; padding: 2px 4px; font-size: 12px; }
+      .sparkline-row:hover { background: rgb(248 250 252); }
+      .dark .sparkline-row:hover { background: rgb(15 23 42); }
+      .sparkline-row .spark-date { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: rgb(100 116 139); }
+      .dark .sparkline-row .spark-date { color: rgb(148 163 184); }
+      .sparkline-row .spark-bar { height: 6px; background: rgb(226 232 240); border-radius: 3px; overflow: hidden; }
+      .dark .sparkline-row .spark-bar { background: rgb(30 41 59); }
+      .sparkline-row .spark-fill { height: 100%; background: rgb(71 85 105); }
+      .dark .sparkline-row .spark-fill { background: rgb(148 163 184); }
+      .sparkline-row .spark-count { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; text-align: right; }
+
+      .member-link {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        font-weight: 600;
+        border-bottom: 1px dashed rgb(148 163 184);
+        text-align: left;
+      }
+      .member-link:hover {
+        color: rgb(15 23 42);
+        border-bottom-color: rgb(15 23 42);
+        border-bottom-style: solid;
+      }
+      .dark .member-link {
+        border-bottom-color: rgb(100 116 139);
+      }
+      .dark .member-link:hover {
+        color: rgb(248 250 252);
+        border-bottom-color: rgb(248 250 252);
+      }
+
+      .week-toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 10px 12px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+      }
+      .week-toggle:hover {
+        background: rgb(248 250 252);
+      }
+      .dark .week-toggle:hover {
+        background: rgb(15 23 42);
+      }
+      .week-toggle[data-week-current="true"] {
+        cursor: default;
+      }
+      .week-toggle[data-week-current="true"]:hover {
+        background: transparent;
+      }
+      .week-chevron {
+        width: 14px;
+        font-size: 10px;
+        color: rgb(100 116 139);
+        flex: 0 0 auto;
+      }
+      .week-label {
+        font-weight: 600;
+        font-size: 14px;
+        flex: 0 0 auto;
+      }
+      .week-meta {
+        font-size: 12px;
+        color: rgb(100 116 139);
+        margin-left: auto;
+        text-align: right;
+      }
+      .dark .week-meta { color: rgb(148 163 184); }
+
+      /* Member detail modal */
+      #member-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 20px;
+        overflow-y: auto;
+      }
+      #member-modal.open { display: flex; }
+      body.modal-open { overflow: hidden; }
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(15 23 42 / 0.5);
+        backdrop-filter: blur(2px);
+      }
+      .modal-panel {
+        position: relative;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 24px 48px rgba(15 23 42 / 0.25);
+        width: 100%;
+        max-width: 720px;
+        max-height: calc(100vh - 40px);
+        display: flex;
+        flex-direction: column;
+        z-index: 1;
+        border: 1px solid rgb(226 232 240);
+      }
+      .dark .modal-panel {
+        background: rgb(15 23 42);
+        border-color: rgb(51 65 85);
+      }
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid rgb(226 232 240);
+      }
+      .dark .modal-header { border-bottom-color: rgb(51 65 85); }
+      .modal-body {
+        padding: 18px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .modal-section-title {
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-size: 11px;
+        font-weight: 700;
+        color: rgb(100 116 139);
+        margin-bottom: 8px;
+      }
+      .dark .modal-section-title { color: rgb(148 163 184); }
+    </style>
+  </head>
+  <body class="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <header class="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">⏱️</span>
+          <h1 class="text-lg font-semibold tracking-tight">Working Management</h1>
+          <span class="text-xs px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Dashboard</span>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+          <span id="last-updated">—</span>
+          <button id="refresh-btn" class="px-2.5 py-1 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium">
+            Refresh
+          </button>
+        </div>
+      </div>
+      <nav class="max-w-6xl mx-auto px-4 pb-3 flex gap-1.5 overflow-x-auto" role="tablist">
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="true" data-tab="activity">Activity History</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="proof">Proof of Work</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="tickets">Support Tickets</button>
+      </nav>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+      <!-- Activity History (spreadsheet) -->
+      <section data-tab-panel="activity" class="active">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 class="text-base font-semibold">Activity History</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Click any column header to sort.</p>
+          </div>
+          <div class="flex items-center gap-2 text-sm flex-wrap">
+            <label class="text-xs text-slate-500 dark:text-slate-400">Member</label>
+            <select id="activity-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Action</label>
+            <select id="activity-action" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1">
+              <option value="">All</option>
+              <option value="time_in">time_in</option>
+              <option value="time_out">time_out</option>
+              <option value="proof_submitted">proof_submitted</option>
+              <option value="proof_reminder_sent">proof_reminder_sent</option>
+              <option value="excuse_requested">excuse_requested</option>
+              <option value="absent_requested">absent_requested</option>
+              <option value="shift_swap_requested">shift_swap_requested</option>
+              <option value="shift_swap_response">shift_swap_response</option>
+              <option value="registered">registered</option>
+            </select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Search</label>
+            <input id="activity-search" type="search" placeholder="message…" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1 px-2 w-40" />
+          </div>
+        </div>
+        <h3 class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">This week</h3>
+        <div class="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+          <table class="sheet" id="activity-table">
+            <thead>
+              <tr>
+                <th data-sort-key="created_at" aria-sort="descending"><span>When (UTC)</span><span class="sort-indicator">▼</span></th>
+                <th data-sort-key="member_name"><span>Member</span><span class="sort-indicator">↕</span></th>
+                <th data-sort-key="action"><span>Action</span><span class="sort-indicator">↕</span></th>
+                <th data-sort-key="message"><span>Message</span><span class="sort-indicator">↕</span></th>
+              </tr>
+            </thead>
+            <tbody id="activity-body">
+              <tr><td colspan="4" class="px-3 py-4 text-slate-500 dark:text-slate-400 text-center text-sm">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mt-4 mb-2">Past weeks</h3>
+        <div id="activity-past" class="space-y-2"></div>
+        <p id="activity-count" class="mt-2 text-xs text-slate-500 dark:text-slate-400"></p>
+      </section>
+
+      <!-- Stats -->
+      <section data-tab-panel="stats">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 class="text-base font-semibold">Group Message Stats</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Daily log of how many messages each member sent in each tracked Telegram group.</p>
+          </div>
+          <div class="flex items-center gap-2 text-sm flex-wrap">
+            <div class="inline-flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden" role="tablist" aria-label="Group stats grouping">
+              <button id="stats-group-date" class="px-2.5 py-1 text-xs font-medium" aria-selected="true">By Date</button>
+              <button id="stats-group-member" class="px-2.5 py-1 text-xs font-medium border-l border-slate-300 dark:border-slate-700" aria-selected="false">By Member</button>
+            </div>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Group</label>
+            <select id="stats-group-filter" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1 min-w-36">
+              <option value="">All groups</option>
+            </select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">From</label>
+            <input id="stats-from" type="date" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1" />
+            <label class="text-xs text-slate-500 dark:text-slate-400">To</label>
+            <input id="stats-to" type="date" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1" />
+          </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <aside class="lg:col-span-1">
+            <h3 class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Totals by Member</h3>
+            <div id="stats-group-summary" class="mb-3 text-xs text-slate-500 dark:text-slate-400"></div>
+            <div id="stats-totals" class="space-y-2">
+              <p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+            </div>
+          </aside>
+          <div class="lg:col-span-2">
+            <h3 id="stats-section-title" class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Daily log</h3>
+            <div id="stats-log" class="space-y-3">
+              <p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+            </div>
+            <p id="stats-count" class="mt-2 text-xs text-slate-500 dark:text-slate-400"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Proof of Work -->
+      <section data-tab-panel="proof">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 class="text-base font-semibold">Proof of Work Submissions</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">All proof of work submissions from the team.</p>
+          </div>
+          <div class="flex items-center gap-2 text-sm flex-wrap">
+            <label class="text-xs text-slate-500 dark:text-slate-400">Member</label>
+            <select id="proof-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">From</label>
+            <input id="proof-from" type="date" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1" />
+            <label class="text-xs text-slate-500 dark:text-slate-400">To</label>
+            <input id="proof-to" type="date" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1" />
+          </div>
+        </div>
+        <div id="proof-list" class="space-y-3">
+          <p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        </div>
+        <p id="proof-count" class="mt-2 text-xs text-slate-500 dark:text-slate-400"></p>
+      </section>
+
+      <!-- Support Tickets -->
+      <section data-tab-panel="tickets">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 class="text-base font-semibold">Support Tickets</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Ticket history, assigned responders, scheduled duty owner, and off-duty coverage.</p>
+          </div>
+          <div class="flex items-center gap-2 text-sm flex-wrap">
+            <label class="text-xs text-slate-500 dark:text-slate-400">Assigned</label>
+            <select id="tickets-assigned-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Scheduled duty</label>
+            <select id="tickets-scheduled-member" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1"></select>
+            <label class="text-xs text-slate-500 dark:text-slate-400 ml-2">Status</label>
+            <select id="tickets-status" class="rounded-md border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-sm py-1">
+              <option value="">All</option>
+              <option value="open">open</option>
+              <option value="accepted">accepted</option>
+              <option value="pending_user_resolution">pending_user_resolution</option>
+              <option value="solved_closed">solved_closed</option>
+              <option value="not_solved_closed">not_solved_closed</option>
+              <option value="closed_by_team">closed_by_team</option>
+              <option value="expired">expired</option>
+            </select>
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+          <table class="sheet" id="tickets-table">
+            <thead>
+              <tr>
+                <th>Ticket #</th>
+                <th>Opened</th>
+                <th>Group</th>
+                <th>Requester / Message</th>
+                <th>Status</th>
+                <th>Scheduled Duty</th>
+                <th>Accepted By</th>
+                <th>Coverage Log</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody id="tickets-body">
+              <tr><td colspan="9" class="px-3 py-4 text-slate-500 dark:text-slate-400 text-center text-sm">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p id="tickets-count" class="mt-2 text-xs text-slate-500 dark:text-slate-400"></p>
+      </section>
+
+      <footer class="mt-10 text-center text-xs text-slate-500 dark:text-slate-400">
+        Read-only public dashboard. Actions are performed in the Telegram bot.
+      </footer>
+    </main>
+
+    <!-- Member detail modal -->
+    <div id="member-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="member-modal-name">
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel" role="document">
+        <header class="modal-header">
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">Member detail</div>
+            <h3 id="member-modal-name" class="text-lg font-semibold">—</h3>
+          </div>
+          <button id="member-modal-close" type="button" class="px-2.5 py-1 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">Close</button>
+        </header>
+        <div class="modal-body">
+          <section class="modal-section">
+            <h4 class="modal-section-title">Messages (group chat)</h4>
+            <div id="member-modal-section-messages"><p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p></div>
+          </section>
+          <section class="modal-section">
+            <h4 class="modal-section-title">Activity</h4>
+            <div id="member-modal-section-activity"><p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p></div>
+          </section>
+          <section class="modal-section">
+            <h4 class="modal-section-title">Proof of Work</h4>
+            <div id="member-modal-section-proof"><p class="text-sm text-slate-500 dark:text-slate-400">Loading…</p></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
