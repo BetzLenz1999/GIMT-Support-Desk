@@ -173,35 +173,36 @@ async function trackGroupMessage(
   } catch (error) {
     console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS", error);
   }
-  if (!shouldCountStats) return;
-
-  if (envChatId === undefined) {
-    await rememberTeamGroupChatId(db, message.chat.id);
-  } else if (envChatId === message.chat.id) {
-    await rememberTeamGroupChatId(db, message.chat.id, { force: true });
-  } else {
-    const key = `${message.chat.id}->${envChatId}`;
-    if (!trackGroupMessageWarnings.envMismatchLogged.has(key)) {
-      trackGroupMessageWarnings.envMismatchLogged.add(key);
-      console.warn(
-        `trackGroupMessage: registered member ${registration.member_id} messaged in chat ${message.chat.id} but TEAM_GROUP_CHAT_ID env var is ${envChatId}. Counting stats for this group without changing the notification fallback. To make this the primary notification group, set TEAM_GROUP_CHAT_ID=${message.chat.id} in Vercel and redeploy.`
-      );
-    }
-  }
 
   const now = message.date ? new Date(message.date * 1000) : new Date();
 
-  try {
-    await incrementGroupMessageCount(db, {
-      member_id: registration.member_id,
-      member_name: registration.member_name,
-      telegram_user_id: user.id,
-      telegram_chat_id: message.chat.id,
-      work_date_utc: utcDateKey(now),
-      message_at_utc: now.toISOString()
-    });
-  } catch (error) {
-    console.error("Failed to record group message stat", error);
+  if (shouldCountStats) {
+    if (envChatId === undefined) {
+      await rememberTeamGroupChatId(db, message.chat.id);
+    } else if (envChatId === message.chat.id) {
+      await rememberTeamGroupChatId(db, message.chat.id, { force: true });
+    } else {
+      const key = `${message.chat.id}->${envChatId}`;
+      if (!trackGroupMessageWarnings.envMismatchLogged.has(key)) {
+        trackGroupMessageWarnings.envMismatchLogged.add(key);
+        console.warn(
+          `trackGroupMessage: registered member ${registration.member_id} messaged in chat ${message.chat.id} but TEAM_GROUP_CHAT_ID env var is ${envChatId}. Counting stats for this group without changing the notification fallback. To make this the primary notification group, set TEAM_GROUP_CHAT_ID=${message.chat.id} in Vercel and redeploy.`
+        );
+      }
+    }
+
+    try {
+      await incrementGroupMessageCount(db, {
+        member_id: registration.member_id,
+        member_name: registration.member_name,
+        telegram_user_id: user.id,
+        telegram_chat_id: message.chat.id,
+        work_date_utc: utcDateKey(now),
+        message_at_utc: now.toISOString()
+      });
+    } catch (error) {
+      console.error("Failed to record group message stat", error);
+    }
   }
 
   await recordTeamTicketReplyIfReferenced(db, message, registration);
@@ -604,6 +605,17 @@ async function recordTeamTicketReplyIfReferenced(
   });
 
   if (shouldConnectReplyToTeamMember(ticket, registration)) {
+    const member = getTeamMember(registration.member_id);
+    if (!member) return;
+
+    const responderIsTimedIn = await isRegistrationTimedIn(db, registration, member);
+    if (ticket.assigned_member_id && ticket.assigned_member_id !== registration.member_id && !responderIsTimedIn) {
+      const text = buildTicketAlreadyAssignedText(ticket, registration);
+      const sent = await sendMessage(message.chat.id, text, { replyToMessageId: message.message_id });
+      await recordBotTicketMessage(db, ticket, sent.message_id, message.message_id, text, message.chat.id);
+      return;
+    }
+
     await connectTicketToTeamMember(db, ticket, registration, {
       chatId: message.chat.id,
       telegramMessageId: message.message_id,
@@ -611,6 +623,11 @@ async function recordTeamTicketReplyIfReferenced(
       eventType: ticket.status === "open" ? "ticket_accepted" : "ticket_handler_reassigned"
     });
   }
+}
+
+function buildTicketAlreadyAssignedText(ticket: SupportTicket, registration: Registration): string {
+  const assignedName = ticket.assigned_member_name ?? "another team member";
+  return `Ticket #${ticketLabel(ticket)} is already assigned to ${assignedName}. ${registration.member_name}, please time in first before taking over this ticket.`;
 }
 
 function getTicketScheduledMember(ticket: SupportTicket): Pick<TeamMember, "id" | "name"> | null {
