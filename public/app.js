@@ -82,6 +82,11 @@ const state = {
     filters: { assigned_member_id: "", scheduled_member_id: "", status: "", telegram_chat_id: "" },
     expandedIds: new Set()
   },
+  ticketSearch: {
+    rows: [],
+    filters: { q: "", member_id: "", status: "" },
+    expandedIds: new Set()
+  },
   memberDetail: {
     open: false,
     memberId: null,
@@ -959,7 +964,7 @@ function renderTicketMessages(row) {
   `;
 }
 
-function renderTicketRow(row) {
+function renderTicketRow(row, source = "tickets") {
   const status = pill(TICKET_STATUS_PILL[row.status] || "pill-slate", TICKET_STATUS_LABEL[row.status] || row.status);
   const assigned = row.assigned_member_name || "—";
   const scheduled = row.scheduled_member_name || "—";
@@ -968,14 +973,14 @@ function renderTicketRow(row) {
     : row.accepted_member_was_timed_in === false
       ? "Accepted while not timed in"
       : "—";
-  const isExpanded = state.tickets.expandedIds.has(row.id);
+  const isExpanded = state[source]?.expandedIds?.has(row.id);
   const messageCount = (row.messages || []).length;
   const code = ticketDisplayCode(row);
   return `
     <tr>
       <td class="mono ticket-cell-nowrap">
         <div class="font-semibold">#${escapeHtml(code)}</div>
-        <button type="button" class="ticket-history-toggle text-xs text-blue-600 dark:text-blue-300 hover:underline" data-ticket-id="${escapeHtml(row.id)}">
+        <button type="button" class="ticket-history-toggle text-xs text-blue-600 dark:text-blue-300 hover:underline" data-ticket-id="${escapeHtml(row.id)}" data-ticket-source="${escapeHtml(source)}">
           ${isExpanded ? "Hide" : "View"} history (${messageCount})
         </button>
       </td>
@@ -1027,7 +1032,7 @@ function renderTickets() {
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No support tickets in this view.</td></tr>';
   } else {
-    tbody.innerHTML = rows.map(renderTicketRow).join("");
+    tbody.innerHTML = rows.map((row) => renderTicketRow(row, "tickets")).join("");
   }
   updateTicketQueueButtons();
   const solvedCount = rows.filter((row) => row.status === "solved_closed").length;
@@ -1045,6 +1050,48 @@ function renderTickets() {
       ? `Chat ${state.tickets.filters.telegram_chat_id}`
       : "All groups";
   $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${solvedCount} solved · ${notSolvedCount} not solved · ${pendingFollowUpCount} pending follow-up · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
+}
+
+function renderTicketSearch() {
+  const tbody = $("#ticket-search-body");
+  const rows = state.ticketSearch.rows;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No tickets match this search.</td></tr>';
+  } else {
+    tbody.innerHTML = rows.map((row) => renderTicketRow(row, "ticketSearch")).join("");
+  }
+  const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
+  const activeFilters = [
+    state.ticketSearch.filters.q ? `search: “${state.ticketSearch.filters.q}”` : "",
+    state.ticketSearch.filters.member_id ? "team member selected" : "",
+    state.ticketSearch.filters.status ? (TICKET_STATUS_LABEL[state.ticketSearch.filters.status] || state.ticketSearch.filters.status) : ""
+  ].filter(Boolean).join(" · ") || "latest tickets";
+  $("#ticket-search-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} found · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${activeFilters}`;
+}
+
+async function loadTicketSearch() {
+  const qs = new URLSearchParams({ limit: "1000" });
+  const { q, member_id, status } = state.ticketSearch.filters;
+  if (q) qs.set("q", q);
+  if (member_id) qs.set("member_id", member_id);
+  if (status) qs.set("status", status);
+
+  $("#ticket-search-body").innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Searching…</td></tr>';
+  try {
+    const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
+    state.ticketSearch.rows = data.tickets;
+    renderTicketSearch();
+  } catch (error) {
+    $("#ticket-search-body").innerHTML = `<tr><td colspan="9" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to search: ${escapeHtml(error.message)}</td></tr>`;
+  }
+}
+
+function debounce(fn, delay = 350) {
+  let timeout = null;
+  return (...args) => {
+    window.clearTimeout(timeout);
+    timeout = window.setTimeout(() => fn(...args), delay);
+  };
 }
 
 async function loadTickets() {
@@ -1105,6 +1152,7 @@ function refreshCurrent() {
   else if (state.currentTab === "stats") loadStats();
   else if (state.currentTab === "proof") loadProof();
   else if (state.currentTab === "tickets") loadTickets();
+  else if (state.currentTab === "ticket-search") loadTicketSearch();
 }
 
 function initDefaultDates() {
@@ -1139,6 +1187,7 @@ async function init() {
   $("#proof-member").setAttribute("data-members-select", "1");
   $("#tickets-assigned-member").setAttribute("data-members-select", "1");
   $("#tickets-scheduled-member").setAttribute("data-members-select", "1");
+  $("#ticket-search-member").setAttribute("data-members-select", "1");
 
   try { await loadMembers(); } catch (error) { console.warn("Failed to load members", error); }
 
@@ -1208,16 +1257,33 @@ async function init() {
   $("#tickets-from").addEventListener("change", loadTickets);
   $("#tickets-to").addEventListener("change", loadTickets);
 
+  // Ticket search filters
+  const debouncedTicketSearch = debounce(loadTicketSearch);
+  $("#ticket-search-query").addEventListener("input", (e) => {
+    state.ticketSearch.filters.q = e.target.value.trim();
+    debouncedTicketSearch();
+  });
+  $("#ticket-search-member").addEventListener("change", (e) => {
+    state.ticketSearch.filters.member_id = e.target.value;
+    loadTicketSearch();
+  });
+  $("#ticket-search-status").addEventListener("change", (e) => {
+    state.ticketSearch.filters.status = e.target.value;
+    loadTicketSearch();
+  });
+
   // Global delegated click handler for member links + week toggles + modal close
   document.addEventListener("click", (e) => {
     const ticketToggle = e.target.closest(".ticket-history-toggle");
     if (ticketToggle) {
       e.preventDefault();
       const id = ticketToggle.dataset.ticketId;
+      const source = ticketToggle.dataset.ticketSource === "ticketSearch" ? "ticketSearch" : "tickets";
       if (id) {
-        if (state.tickets.expandedIds.has(id)) state.tickets.expandedIds.delete(id);
-        else state.tickets.expandedIds.add(id);
-        renderTickets();
+        if (state[source].expandedIds.has(id)) state[source].expandedIds.delete(id);
+        else state[source].expandedIds.add(id);
+        if (source === "ticketSearch") renderTicketSearch();
+        else renderTickets();
       }
       return;
     }

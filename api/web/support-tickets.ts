@@ -33,6 +33,8 @@ export default async function handler(request: any, response: any) {
     const telegramChatId = url.searchParams.get("telegram_chat_id");
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
+    const memberId = url.searchParams.get("member_id");
+    const search = (url.searchParams.get("q") || "").trim().toLowerCase();
     const rowLimit = parseInteger(url.searchParams.get("limit"), 200, 1, 1000);
 
     const filters: [string, string][] = [order("created_at", false), limit(rowLimit)];
@@ -66,7 +68,37 @@ export default async function handler(request: any, response: any) {
       messages: messagesByTicket[ticket.id] ?? []
     }));
 
-    const coverage = tickets
+    const searchableTickets = ticketsWithMessages.filter((ticket) => {
+      const memberMatches = !memberId || [
+        ticket.assigned_member_id,
+        ticket.scheduled_member_id,
+        ticket.covered_for_member_id
+      ].some((value) => value === memberId);
+      if (!memberMatches) return false;
+
+      if (!search) return true;
+      const haystack = [
+        ticket.ticket_code,
+        ticket.id,
+        ticket.opened_by_name,
+        ticket.opened_message_text,
+        ticket.status,
+        ticket.assigned_member_name,
+        ticket.scheduled_member_name,
+        ticket.covered_for_member_name,
+        ticket.group_title,
+        ticket.telegram_chat_id,
+        ...ticket.messages.flatMap((message) => [
+          message.sender_name,
+          message.sender_type,
+          message.message_text,
+          message.telegram_message_id
+        ])
+      ].filter((value) => value != null).join(" ").toLowerCase();
+      return haystack.includes(search);
+    });
+
+    const coverage = searchableTickets
       .filter((ticket) => ticket.covered_for_member_id && ticket.assigned_member_id)
       .map((ticket) => ({
         ticket_id: ticket.id,
@@ -80,7 +112,7 @@ export default async function handler(request: any, response: any) {
         accepted_during_own_shift: ticket.accepted_during_own_shift
       }));
 
-    sendJson(response, 200, { ok: true, count: tickets.length, tickets: ticketsWithMessages, coverage });
+    sendJson(response, 200, { ok: true, count: searchableTickets.length, tickets: searchableTickets, coverage });
   } catch (error) {
     sendJson(response, 500, {
       ok: false,
