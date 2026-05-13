@@ -10,7 +10,8 @@ function single<T>(rows: T[]): T {
 const ACTIVE_SUPPORT_TICKET_STATUSES: SupportTicketStatus[] = [
   "open",
   "accepted",
-  "pending_user_resolution"
+  "pending_user_resolution",
+  "pending_follow_up"
 ];
 
 
@@ -416,6 +417,23 @@ export async function listRecentBotSupportTicketMessages(
       eq("ticket_id", ticketId),
       eq("sender_type", "bot"),
       order("created_at", false),
+      limit(rowLimit)
+    )
+  );
+}
+
+
+export async function listSupportTicketsPendingResolutionTimeout(
+  db: SupabaseRestClient,
+  olderThanUtc: string,
+  rowLimit = 100
+): Promise<SupportTicket[]> {
+  return db.select<SupportTicket>(
+    "support_tickets",
+    params(
+      eq("status", "pending_user_resolution"),
+      lte("resolution_requested_at", olderThanUtc),
+      order("resolution_requested_at", true),
       limit(rowLimit)
     )
   );

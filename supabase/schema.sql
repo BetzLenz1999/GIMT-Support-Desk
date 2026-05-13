@@ -234,7 +234,7 @@ create table if not exists public.support_tickets (
   opened_message_id bigint not null,
   opened_message_text text not null,
   status text not null default 'open' check (
-    status in ('open', 'accepted', 'pending_user_resolution', 'solved_closed', 'not_solved_closed', 'closed_by_team', 'expired')
+    status in ('open', 'accepted', 'pending_user_resolution', 'pending_follow_up', 'solved_closed', 'not_solved_closed', 'closed_by_team', 'expired')
   ),
   assigned_member_id text,
   assigned_member_name text,
@@ -250,6 +250,7 @@ create table if not exists public.support_tickets (
   resolved_by_telegram_user_id bigint,
   resolution text check (resolution is null or resolution in ('solved', 'not_solved')),
   resolved_at timestamptz,
+  pending_follow_up_at timestamptz,
   closed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -303,3 +304,17 @@ alter table if exists public.support_tickets
   add column if not exists covered_for_member_name text;
 create index if not exists support_tickets_scheduled_member_idx on public.support_tickets(scheduled_member_id, created_at desc);
 create index if not exists support_tickets_covered_for_member_idx on public.support_tickets(covered_for_member_id, created_at desc);
+
+
+alter table if exists public.support_tickets
+  add column if not exists pending_follow_up_at timestamptz;
+create index if not exists support_tickets_pending_follow_up_idx
+  on public.support_tickets(status, resolution_requested_at)
+  where status = 'pending_user_resolution' and resolution_requested_at is not null;
+
+alter table if exists public.support_tickets
+  drop constraint if exists support_tickets_status_check;
+alter table if exists public.support_tickets
+  add constraint support_tickets_status_check check (
+    status in ('open', 'accepted', 'pending_user_resolution', 'pending_follow_up', 'solved_closed', 'not_solved_closed', 'closed_by_team', 'expired')
+  );
