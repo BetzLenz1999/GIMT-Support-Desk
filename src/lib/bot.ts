@@ -570,10 +570,7 @@ function getTicketScheduledMember(ticket: SupportTicket): Pick<TeamMember, "id" 
 function shouldConnectReplyToTeamMember(ticket: SupportTicket, registration: Registration): boolean {
   if (isTicketClosed(ticket) || ticket.status === "pending_user_resolution") return false;
   if (!ticket.assigned_member_id) return true;
-  if (ticket.assigned_member_id === registration.member_id) return false;
-
-  const scheduledMember = getTicketScheduledMember(ticket);
-  return Boolean(scheduledMember && ticket.assigned_member_id === scheduledMember.id);
+  return ticket.assigned_member_id !== registration.member_id;
 }
 
 type TicketConnectionOptions = {
@@ -582,6 +579,40 @@ type TicketConnectionOptions = {
   replyToMessageId: number;
   eventType?: "ticket_accepted" | "ticket_handler_reassigned";
 };
+
+function buildTicketConnectionText(
+  previousTicket: SupportTicket,
+  updatedTicket: SupportTicket,
+  registration: Registration,
+  scheduledMember: Pick<TeamMember, "id" | "name"> | null,
+  coveredForMember: Pick<TeamMember, "id" | "name"> | null
+): string {
+  const label = ticketLabel(updatedTicket);
+  const previousAssignedName = previousTicket.assigned_member_name;
+  const scheduledMemberReturned = Boolean(
+    scheduledMember &&
+    scheduledMember.id === registration.member_id &&
+    previousTicket.assigned_member_id &&
+    previousTicket.assigned_member_id !== registration.member_id
+  );
+
+  if (scheduledMemberReturned) {
+    return `Update: ${registration.member_name} is now back and can assist you on this ticket.
+Ticket #${label} is now connected to ${registration.member_name} for handling.`;
+  }
+
+  if (coveredForMember) {
+    return `Update: ${coveredForMember.name} is the scheduled support member, but ${registration.member_name} is now assisting on this ticket.
+Ticket #${label} is now connected to ${registration.member_name} for handling.`;
+  }
+
+  if (previousAssignedName && previousTicket.assigned_member_id !== registration.member_id) {
+    return `Update: ${registration.member_name} is now assisting on this ticket instead of ${previousAssignedName}.
+Ticket #${label} is now connected to ${registration.member_name} for handling.`;
+  }
+
+  return `${registration.member_name} is now assisting on ticket #${label}.`;
+}
 
 async function connectTicketToTeamMember(
   db: SupabaseRestClient,
@@ -653,10 +684,8 @@ async function connectTicketToTeamMember(
     });
   }
 
-  const text = coveredForMember
-    ? `Update: ${coveredForMember.name} is the scheduled support member, but ${registration.member_name} is now assisting on this ticket.
-Ticket #${ticketLabel(updatedTicket)} is now connected to ${registration.member_name} for handling.`
-    : `${registration.member_name} is now assisting on ticket #${ticketLabel(updatedTicket)}.`;
+  const text = buildTicketConnectionText(ticket, updatedTicket, registration, scheduledMember, coveredForMember);
+  await removePreviousTicketBotPrompts(db, updatedTicket, options.chatId);
   const sent = await sendMessage(options.chatId, text, {
     replyToMessageId: options.replyToMessageId,
     replyMarkup: ticketResolutionRequestKeyboard(updatedTicket.id)
