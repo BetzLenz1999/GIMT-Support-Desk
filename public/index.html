@@ -29,21 +29,7 @@
     <style>
       body { font-feature-settings: "ss01", "cv11"; }
       .dashboard-shell {
-        transform-origin: top center;
-      }
-      @media (min-width: 1024px) {
-        .dashboard-shell {
-          transform: scale(0.7);
-          width: 142.857%;
-          margin-left: -21.4285%;
-        }
-        header .dashboard-shell {
-          margin-bottom: -22px;
-        }
-        main.dashboard-shell {
-          margin-top: -8px;
-          margin-bottom: -30%;
-        }
+        width: 100%;
       }
       [data-tab-panel] { display: none; }
       [data-tab-panel].active { display: block; }
@@ -445,7 +431,7 @@
   </head>
   <body class="min-h-full bg-gradient-to-br from-slate-50 via-teal-50 to-sky-50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950 dark:text-slate-100">
     <header class="border-b border-teal-100 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur sticky top-0 z-20 shadow-sm">
-      <div class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap mobile-stack">
+      <div class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap mobile-stack">
         <div class="flex items-center gap-2 min-w-0">
           <span class="grid h-8 w-8 place-items-center rounded-full bg-teal-600 text-sm font-black text-white">G</span>
           <h1 class="text-base sm:text-lg font-semibold tracking-tight leading-tight">GoodDollar International Moderation Team</h1>
@@ -458,7 +444,7 @@
           </button>
         </div>
       </div>
-      <nav class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
+      <nav class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Home</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="activity">Activity History</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
@@ -467,7 +453,7 @@
       </nav>
     </header>
 
-    <main class="dashboard-shell max-w-none mx-auto px-3 sm:px-4 py-4 sm:py-5">
+    <main class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 py-4 sm:py-5">
       <section data-tab-panel="home">
         <div class="welcome-card rounded-3xl p-5 sm:p-7 mb-4 overflow-hidden relative">
           <div class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/50 dark:bg-teal-500/10"></div>
@@ -483,7 +469,7 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
           <button type="button" class="menu-card" data-menu-tab="activity">
             <span class="text-3xl font-black text-teal-600 dark:text-teal-300">A</span>
             <span>
