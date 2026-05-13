@@ -1,4 +1,4 @@
-import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket } from "./supabase.js";
+import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
 import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketAcceptKeyboard, ticketResolutionRequestKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
@@ -36,7 +36,7 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { answerCallbackQuery, deleteMessage, editMessageText, sendMessage } from "./telegram.js";
+import { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -325,8 +325,71 @@ function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string 
   return ticket.ticket_code ?? ticket.id.slice(0, 8);
 }
 
+const SUPPORT_TICKET_ATTACHMENT_BUCKET = "support-ticket-attachments";
+
 function supportMessageText(message: TelegramMessage): string {
-  return message.text?.trim() || "[non-text message]";
+  const text = message.text?.trim() || message.caption?.trim() || "";
+  if (message.photo?.length) {
+    return text ? `${text}\n\n[photo attachment]` : "[photo attachment]";
+  }
+  return text || "[non-text message]";
+}
+
+async function saveSupportTicketAttachments(
+  db: SupabaseRestClient,
+  ticketId: string,
+  message: TelegramMessage
+): Promise<SupportTicketAttachment[]> {
+  if (!message.photo?.length) return [];
+
+  const largestPhoto = [...message.photo].sort((a, b) => {
+    const aArea = a.width * a.height;
+    const bArea = b.width * b.height;
+    if (aArea !== bArea) return bArea - aArea;
+    return (b.file_size ?? 0) - (a.file_size ?? 0);
+  })[0];
+
+  try {
+    const telegramFile = await getFile(largestPhoto.file_id);
+    if (!telegramFile.file_path) throw new Error("Telegram did not return a file_path for this photo.");
+
+    const downloaded = await downloadFile(telegramFile.file_path);
+    const extension = fileExtensionFromPath(telegramFile.file_path) || "jpg";
+    const objectPath = `${ticketId}/${message.message_id}/${largestPhoto.file_unique_id ?? largestPhoto.file_id}.${extension}`;
+    const contentType = downloaded.contentType || contentTypeForExtension(extension);
+
+    await db.uploadObject(SUPPORT_TICKET_ATTACHMENT_BUCKET, objectPath, downloaded.bytes, contentType);
+
+    return [{
+      type: "photo",
+      bucket: SUPPORT_TICKET_ATTACHMENT_BUCKET,
+      path: objectPath,
+      url: db.getPublicObjectUrl(SUPPORT_TICKET_ATTACHMENT_BUCKET, objectPath),
+      telegram_file_id: largestPhoto.file_id,
+      telegram_file_unique_id: largestPhoto.file_unique_id,
+      file_size: telegramFile.file_size ?? largestPhoto.file_size,
+      width: largestPhoto.width,
+      height: largestPhoto.height,
+      content_type: contentType
+    }];
+  } catch (error) {
+    console.warn(
+      `Failed to save support ticket attachment for ticket ${ticketId}, message ${message.message_id}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return [];
+  }
+}
+
+function fileExtensionFromPath(path: string): string | null {
+  const lastSegment = path.split("/").pop() ?? "";
+  const match = /\.([a-z0-9]+)$/i.exec(lastSegment);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+function contentTypeForExtension(extension: string): string {
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  return "image/jpeg";
 }
 
 function buildTeamMemberMention(registration: Registration | null, fallbackName: string): string {
@@ -406,6 +469,7 @@ async function recordCustomerTicketFollowUp(
   user: TelegramUser
 ): Promise<void> {
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
+  const attachments = await saveSupportTicketAttachments(db, ticket.id, message);
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -415,6 +479,7 @@ async function recordCustomerTicketFollowUp(
     sender_name: ticket.opened_by_name || getTelegramUserDisplayName(user),
     sender_type: "customer",
     message_text: supportMessageText(message),
+    attachments,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -426,7 +491,7 @@ async function recordCustomerTicketFollowUp(
     actor_type: "customer",
     telegram_chat_id: message.chat.id,
     telegram_message_id: message.message_id,
-    metadata: { ticketCode: ticket.ticket_code }
+    metadata: { ticketCode: ticket.ticket_code, attachments }
   });
 
   let currentTicket = ticket;
@@ -471,6 +536,7 @@ async function recordTeamTicketReplyIfReferenced(
   if (!ticket) return;
 
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
+  const attachments = await saveSupportTicketAttachments(db, ticket.id, message);
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -480,6 +546,7 @@ async function recordTeamTicketReplyIfReferenced(
     sender_name: registration.member_name,
     sender_type: "team_member",
     message_text: supportMessageText(message),
+    attachments,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -643,6 +710,8 @@ async function openSupportTicket(
     closed_at: null
   });
 
+  const attachments = await saveSupportTicketAttachments(db, ticket.id, message);
+
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -652,6 +721,7 @@ async function openSupportTicket(
     sender_name: openedByName,
     sender_type: "customer",
     message_text: concernText,
+    attachments,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -663,7 +733,7 @@ async function openSupportTicket(
     actor_type: "customer",
     telegram_chat_id: message.chat.id,
     telegram_message_id: sourceMessageId,
-    metadata: { groupTitle: message.chat.title ?? null, concern: concernText }
+    metadata: { groupTitle: message.chat.title ?? null, concern: concernText, attachments }
   });
 
   const ticketSaveReminder = `Your ticket #${ticketLabel(ticket)} has been created. Please save this ticket number in case the issue is not resolved and you need to follow up in the future.`;
