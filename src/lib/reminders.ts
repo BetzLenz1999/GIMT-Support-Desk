@@ -1,9 +1,9 @@
 import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket } from "./supabase.js";
-import { createActivity, findTimeLog, hasCronEvent, listRegistrations, listSupportTicketsPendingResolutionTimeout, recordCronEvent, recordGroupActionMessage, recordSupportTicketEvent, recordSupportTicketMessage, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
+import { createActivity, findTimeLog, hasCronEvent, listRecentBotSupportTicketMessages, listRegistrations, listSupportTicketsPendingResolutionTimeout, recordCronEvent, recordGroupActionMessage, recordSupportTicketEvent, recordSupportTicketMessage, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
 import { sendTeamGroupMessage, sendTeamGroupMessageWithResult, sweepExpiredGroupActionMessages } from "./group-notifications.js";
 import { dashboardKeyboard, groupProofOfWorkKeyboard, groupTimeInKeyboard, groupTimeOutKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
 import { TEAM_SCHEDULE, getNextScheduledMember, getTeamMember } from "./team-schedule.js";
-import { sendMessage } from "./telegram.js";
+import { deleteMessage, sendMessage } from "./telegram.js";
 import type { InlineKeyboardMarkup } from "./telegram-types.js";
 import { formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, minutesBetween, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -578,6 +578,27 @@ async function sendProofOfWorkGroupOnce(
   return 1;
 }
 
+async function deleteStaleResolutionPrompts(db: SupabaseRestClient, ticket: SupportTicket): Promise<void> {
+  const botMessages = await listRecentBotSupportTicketMessages(db, ticket.id);
+  const deletedMessageIds = new Set<number>();
+
+  for (const botMessage of botMessages) {
+    if (botMessage.telegram_chat_id !== ticket.telegram_chat_id) continue;
+    if (deletedMessageIds.has(botMessage.telegram_message_id)) continue;
+    if (!isTicketResolutionPrompt(botMessage.message_text)) continue;
+
+    deletedMessageIds.add(botMessage.telegram_message_id);
+    await deleteMessage(botMessage.telegram_chat_id, botMessage.telegram_message_id);
+  }
+}
+
+function isTicketResolutionPrompt(text: string | null): boolean {
+  if (!text) return false;
+
+  return text.includes("was your issue resolved")
+    && text.includes("✅ Solved")
+    && text.includes("❌ Not Solved");
+}
 
 function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string {
   return ticket.ticket_code ?? ticket.id.slice(0, 8);
@@ -612,6 +633,8 @@ async function sweepPendingSupportTicketResolutionPrompts(
         pendingFollowUpAt: movedAt
       }
     });
+
+    await deleteStaleResolutionPrompts(db, ticket);
 
     const text = `⏳ Ticket #${ticketLabel(updatedTicket)} moved to Pending Follow-up. No Solved / Not Solved response was received within 30 minutes. If ${ticket.opened_by_name} still needs help, they can send a new message and this same ticket will reopen instead of creating a new one.`;
     try {
