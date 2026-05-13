@@ -1,5 +1,5 @@
 import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
-import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketAcceptKeyboard, ticketResolutionRequestKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
+import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketAcceptKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
   createActivity,
@@ -154,6 +154,11 @@ async function trackGroupMessage(
   }
 
   await rememberTelegramGroup(db, message.chat);
+
+  if (isResolutionRequestCommand(message)) {
+    await handleTicketResolutionCommand(db, message, registration);
+    return;
+  }
 
   let envChatId: number | undefined;
   try {
@@ -426,7 +431,7 @@ async function createSupportTicketWithCode(
 function ticketFollowUpReplyMarkup(ticket: SupportTicket) {
   if (ticket.status === "open") return ticketAcceptKeyboard(ticket.id);
   if (ticket.status === "pending_user_resolution") return ticketUserResolutionKeyboard(ticket.id);
-  return ticketResolutionRequestKeyboard(ticket.id);
+  return undefined;
 }
 
 function ticketFollowUpText(ticket: SupportTicket): string {
@@ -440,7 +445,7 @@ function ticketFollowUpText(ticket: SupportTicket): string {
   if (ticket.status === "pending_follow_up") {
     return `Ticket #${code} was moved to Pending Follow-up because there was no response to the Solved / Not Solved prompt within 30 minutes. This message reopens the same ticket for review.`;
   }
-  return `Ticket #${code} is still active${ticket.assigned_member_name ? ` with ${ticket.assigned_member_name}` : ""}. The assigned team member can ask for resolution status again below.`;
+  return `Ticket #${code} is still active${ticket.assigned_member_name ? ` with ${ticket.assigned_member_name}` : ""}.`;
 }
 
 async function removePreviousTicketBotPrompts(
@@ -522,6 +527,54 @@ async function recordCustomerTicketFollowUp(
     replyMarkup: ticketFollowUpReplyMarkup(currentTicket)
   });
   await recordBotTicketMessage(db, currentTicket, sent.message_id, message.message_id, text, message.chat.id);
+}
+
+function isResolutionRequestCommand(message: TelegramMessage): boolean {
+  return getCommand(message.text?.trim() ?? "") === "/1";
+}
+
+async function handleTicketResolutionCommand(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  registration: Registration
+): Promise<void> {
+  const replyToMessageId = message.reply_to_message?.message_id;
+  if (!replyToMessageId) {
+    await sendMessage(message.chat.id, "Please reply /1 to the requester/ticket message you want to ask for resolution status.", {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
+  const ticket = await findActiveSupportTicketByMessageReference(db, message.chat.id, replyToMessageId);
+  if (!ticket) {
+    await sendMessage(message.chat.id, "No active support ticket found for the message you replied to.", {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
+  if (isTicketClosed(ticket)) {
+    await sendMessage(message.chat.id, "This ticket is already closed.", { replyToMessageId: message.message_id });
+    return;
+  }
+
+  if (ticket.accepted_by_telegram_user_id !== registration.telegram_user_id) {
+    await sendMessage(message.chat.id, "Only the assigned team member can ask this.", {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
+  await requestTicketResolutionFromUser(db, ticket, {
+    actorTelegramUserId: registration.telegram_user_id,
+    actorName: registration.member_name,
+    chatId: message.chat.id,
+    triggerMessageId: message.message_id,
+    promptReplyToMessageId: replyToMessageId
+  });
+
+  await deleteMessage(message.chat.id, message.message_id);
 }
 
 async function recordTeamTicketReplyIfReferenced(
@@ -688,7 +741,7 @@ async function connectTicketToTeamMember(
   await removePreviousTicketBotPrompts(db, updatedTicket, options.chatId);
   const sent = await sendMessage(options.chatId, text, {
     replyToMessageId: options.replyToMessageId,
-    replyMarkup: ticketResolutionRequestKeyboard(updatedTicket.id)
+    replyMarkup: undefined
   });
 
   await recordBotTicketMessage(db, updatedTicket, sent.message_id, options.replyToMessageId, text, options.chatId);
@@ -786,7 +839,7 @@ An available team member can handle this ticket.`;
   const sent = await sendMessage(message.chat.id, promptText, {
     parseMode: "HTML",
     replyToMessageId: sourceMessageId,
-    replyMarkup: scheduledMemberIsActive ? ticketResolutionRequestKeyboard(ticket.id) : ticketAcceptKeyboard(ticket.id)
+    replyMarkup: scheduledMemberIsActive ? undefined : ticketAcceptKeyboard(ticket.id)
   });
 
   await recordSupportTicketMessage(db, {
@@ -901,6 +954,31 @@ async function handleTicketResolutionRequest(
   }
 
   await answerCallbackQuery(callback.id, "Asked requester for resolution status.");
+  await deleteCallbackMessage(chatId, callback);
+  await requestTicketResolutionFromUser(db, ticket, {
+    actorTelegramUserId: callback.from.id,
+    actorName: ticket.assigned_member_name ?? getTelegramUserDisplayName(callback.from),
+    chatId,
+    triggerMessageId: callback.message?.message_id ?? null,
+    promptReplyToMessageId: ticket.opened_message_id,
+    preserveBotMessageId: callback.message?.message_id
+  });
+}
+
+type TicketResolutionRequestOptions = {
+  actorTelegramUserId: number;
+  actorName: string;
+  chatId: number;
+  triggerMessageId: number | null;
+  promptReplyToMessageId: number;
+  preserveBotMessageId?: number;
+};
+
+async function requestTicketResolutionFromUser(
+  db: SupabaseRestClient,
+  ticket: SupportTicket,
+  options: TicketResolutionRequestOptions
+): Promise<void> {
   const now = new Date().toISOString();
   const updatedTicket = await updateSupportTicket(db, ticket.id, {
     status: "pending_user_resolution",
@@ -910,28 +988,27 @@ async function handleTicketResolutionRequest(
   await recordSupportTicketEvent(db, {
     ticket_id: ticket.id,
     event_type: "resolution_requested",
-    actor_telegram_user_id: callback.from.id,
-    actor_name: ticket.assigned_member_name ?? getTelegramUserDisplayName(callback.from),
+    actor_telegram_user_id: options.actorTelegramUserId,
+    actor_name: options.actorName,
     actor_type: "team_member",
-    telegram_chat_id: chatId,
-    telegram_message_id: callback.message?.message_id ?? null,
+    telegram_chat_id: options.chatId,
+    telegram_message_id: options.triggerMessageId,
     metadata: {}
   });
 
-  await deleteCallbackMessage(chatId, callback);
-  await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
+  await removePreviousTicketBotPrompts(db, ticket, options.chatId, { exceptMessageId: options.preserveBotMessageId });
 
   const text = `${ticket.opened_by_name}, was your issue resolved for ticket #${ticketLabel(ticket)}?
 
 If your issue has been solved by our support team, please press ✅ Solved to close this ticket.
 
 If your issue has not been solved, please press ❌ Not Solved to close this ticket and mark it for review.`;
-  const sent = await sendMessage(chatId, text, {
-    replyToMessageId: ticket.opened_message_id,
+  const sent = await sendMessage(options.chatId, text, {
+    replyToMessageId: options.promptReplyToMessageId,
     replyMarkup: ticketUserResolutionKeyboard(ticket.id)
   });
 
-  await recordBotTicketMessage(db, updatedTicket, sent.message_id, ticket.opened_message_id, text, chatId);
+  await recordBotTicketMessage(db, updatedTicket, sent.message_id, options.promptReplyToMessageId, text, options.chatId);
 }
 
 async function handleTicketUserResolution(
