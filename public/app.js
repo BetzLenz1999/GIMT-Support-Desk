@@ -922,6 +922,24 @@ function ticketGroupName(row) {
   return row.group_title || (row.telegram_chat_id ? `Chat ${row.telegram_chat_id}` : "—");
 }
 
+
+function renderTicketMessageAttachments(message) {
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && attachment.url);
+  if (!photos.length) return "";
+
+  return `
+    <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      ${photos.map((attachment, index) => `
+        <a href="${escapeHtml(attachment.url)}" target="_blank" rel="noopener noreferrer" class="block rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-900">
+          <img src="${escapeHtml(attachment.url)}" alt="Ticket photo attachment ${index + 1}" loading="lazy" class="max-h-64 w-full object-contain bg-slate-100 dark:bg-slate-900" />
+          <div class="px-2 py-1 text-[11px] text-blue-600 dark:text-blue-300">Open image</div>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderTicketMessages(row) {
   const messages = row.messages || [];
   if (!messages.length) {
@@ -937,6 +955,7 @@ function renderTicketMessages(row) {
             <span class="mono whitespace-nowrap">${escapeHtml(fmtTimeUtc(message.message_date_utc))}</span>
           </div>
           <div class="mt-1 text-sm whitespace-pre-wrap break-words">${escapeHtml(ticketMessageDisplayText(message.message_text))}</div>
+          ${renderTicketMessageAttachments(message)}
         </div>
       `).join("")}
     </div>

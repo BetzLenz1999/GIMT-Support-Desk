@@ -12,12 +12,22 @@ export type TelegramChat = {
   title?: string;
 };
 
+export type TelegramPhotoSize = {
+  file_id: string;
+  file_unique_id?: string;
+  width: number;
+  height: number;
+  file_size?: number;
+};
+
 export type TelegramMessage = {
   message_id: number;
   from?: TelegramUser;
   chat: TelegramChat;
   text?: string;
+  caption?: string;
   date?: number;
+  photo?: TelegramPhotoSize[];
   new_chat_members?: TelegramUser[];
   reply_to_message?: TelegramMessage;
 };
