@@ -104,34 +104,6 @@ function escapeHtml(value) {
   }[ch]));
 }
 
-
-function sanitizeTicketMessageText(value) {
-  return String(value ?? "")
-    .replace(/<a\s+href=["']tg:\/\/user\?id=\d+["']\s*>(.*?)<\/a>/gi, "$1")
-    .replace(/tg:\/\/user\?id=\d+/gi, "Telegram user")
-    .replace(/\b(?:id=)?\d{7,}\b/g, "")
-    .replace(/<\/?[^>]+>/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function renderTicketAttachment(message) {
-  if (!message.attachment_url) return "";
-  const label = message.attachment_name || message.attachment_type || "Attachment";
-  const isImage = ["photo", "image"].includes(message.attachment_type);
-  const link = `<a href="${escapeHtml(message.attachment_url)}" target="_blank" rel="noopener" class="text-xs text-blue-600 dark:text-blue-300 hover:underline">Open ${escapeHtml(label)}</a>`;
-  if (!isImage) return `<div class="mt-2">${link}</div>`;
-  return `
-    <div class="mt-2">
-      <a href="${escapeHtml(message.attachment_url)}" target="_blank" rel="noopener" class="inline-block">
-        <img src="${escapeHtml(message.attachment_url)}" alt="${escapeHtml(label)}" loading="lazy" class="max-h-64 rounded border border-slate-200 dark:border-slate-700 object-contain" />
-      </a>
-      <div>${link}</div>
-    </div>
-  `;
-}
-
 function fmtTimeUtc(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -930,7 +902,7 @@ function ticketDisplayCode(row) {
 }
 
 function ticketGroupName(row) {
-  return row.group_title || "Support chat";
+  return row.group_title || (row.telegram_chat_id ? `Chat ${row.telegram_chat_id}` : "—");
 }
 
 function renderTicketMessages(row) {
@@ -947,8 +919,7 @@ function renderTicketMessages(row) {
             <span><strong>${escapeHtml(message.sender_name)}</strong> · ${escapeHtml(message.sender_type)}</span>
             <span class="mono whitespace-nowrap">${escapeHtml(fmtTimeUtc(message.message_date_utc))}</span>
           </div>
-          <div class="mt-1 text-sm whitespace-pre-wrap break-words">${escapeHtml(sanitizeTicketMessageText(message.message_text))}</div>
-          ${renderTicketAttachment(message)}
+          <div class="mt-1 text-sm whitespace-pre-wrap break-words">${escapeHtml(message.message_text)}</div>
         </div>
       `).join("")}
     </div>
@@ -981,11 +952,11 @@ function renderTicketRow(row) {
       </td>
       <td>
         <div class="font-medium">${escapeHtml(ticketGroupName(row))}</div>
-        ${row.group_title ? "" : `<div class="text-[10px] text-slate-400">No group title saved</div>`}
+        ${row.telegram_chat_id ? `<div class="text-[10px] text-slate-400 mono">${escapeHtml(row.telegram_chat_id)}</div>` : ""}
       </td>
       <td>
         <div class="font-medium">${escapeHtml(row.opened_by_name)}</div>
-        <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(sanitizeTicketMessageText(row.opened_message_text))}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(row.opened_message_text)}</div>
         <div class="mt-1 text-[11px] text-slate-400">Conversation is hidden until you click View history.</div>
       </td>
       <td>${status}</td>
