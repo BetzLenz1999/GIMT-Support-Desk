@@ -374,6 +374,9 @@ function ticketFollowUpText(ticket: SupportTicket): string {
   if (ticket.status === "pending_user_resolution") {
     return `Ticket #${code} is still waiting for ${ticket.opened_by_name} to choose Solved or Not Solved. Please use the buttons below so a new ticket will not be opened for the same concern.`;
   }
+  if (ticket.status === "pending_follow_up") {
+    return `Ticket #${code} was moved to Pending Follow-up because there was no response to the Solved / Not Solved prompt within 30 minutes. This message reopens the same ticket for review.`;
+  }
   return `Ticket #${code} is still active${ticket.assigned_member_name ? ` with ${ticket.assigned_member_name}` : ""}. The assigned team member can ask for resolution status again below.`;
 }
 
@@ -426,14 +429,34 @@ async function recordCustomerTicketFollowUp(
     metadata: { ticketCode: ticket.ticket_code }
   });
 
-  await removePreviousTicketBotPrompts(db, ticket, message.chat.id);
+  let currentTicket = ticket;
+  if (ticket.status === "pending_follow_up") {
+    currentTicket = await updateSupportTicket(db, ticket.id, {
+      status: ticket.assigned_member_id ? "accepted" : "open",
+      resolution_requested_at: null,
+      pending_follow_up_at: null
+    });
 
-  const text = ticketFollowUpText(ticket);
+    await recordSupportTicketEvent(db, {
+      ticket_id: ticket.id,
+      event_type: "ticket_reopened_by_customer",
+      actor_telegram_user_id: user.id,
+      actor_name: ticket.opened_by_name || getTelegramUserDisplayName(user),
+      actor_type: "customer",
+      telegram_chat_id: message.chat.id,
+      telegram_message_id: message.message_id,
+      metadata: { previousStatus: ticket.status, reopenedStatus: currentTicket.status }
+    });
+  }
+
+  await removePreviousTicketBotPrompts(db, currentTicket, message.chat.id);
+
+  const text = ticketFollowUpText(currentTicket);
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
-    replyMarkup: ticketFollowUpReplyMarkup(ticket)
+    replyMarkup: ticketFollowUpReplyMarkup(currentTicket)
   });
-  await recordBotTicketMessage(db, ticket, sent.message_id, message.message_id, text, message.chat.id);
+  await recordBotTicketMessage(db, currentTicket, sent.message_id, message.message_id, text, message.chat.id);
 }
 
 async function recordTeamTicketReplyIfReferenced(
@@ -616,6 +639,7 @@ async function openSupportTicket(
     resolved_by_telegram_user_id: null,
     resolution: null,
     resolved_at: null,
+    pending_follow_up_at: null,
     closed_at: null
   });
 
@@ -820,6 +844,12 @@ async function handleTicketUserResolution(
 
   if (isTicketClosed(ticket)) {
     await answerCallbackQuery(callback.id, "This ticket is already closed.", { showAlert: true });
+    await deleteCallbackMessage(chatId, callback);
+    return;
+  }
+
+  if (ticket.status === "pending_follow_up") {
+    await answerCallbackQuery(callback.id, "This prompt expired after 30 minutes. Please send a new message to reopen this ticket.", { showAlert: true });
     await deleteCallbackMessage(chatId, callback);
     return;
   }

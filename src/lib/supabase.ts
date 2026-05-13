@@ -142,6 +142,7 @@ export type SupportTicketStatus =
   | "open"
   | "accepted"
   | "pending_user_resolution"
+  | "pending_follow_up"
   | "solved_closed"
   | "not_solved_closed"
   | "closed_by_team"
@@ -173,6 +174,7 @@ export type SupportTicket = {
   resolved_by_telegram_user_id: number | null;
   resolution: SupportTicketResolution | null;
   resolved_at: string | null;
+  pending_follow_up_at: string | null;
   closed_at: string | null;
   created_at: string;
   updated_at: string;

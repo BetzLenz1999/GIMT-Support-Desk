@@ -35,10 +35,22 @@ const TICKET_STATUS_PILL = {
   open: "pill-yellow",
   accepted: "pill-blue",
   pending_user_resolution: "pill-yellow",
+  pending_follow_up: "pill-yellow",
   solved_closed: "pill-green",
   not_solved_closed: "pill-red",
   closed_by_team: "pill-slate",
   expired: "pill-slate"
+};
+
+const TICKET_STATUS_LABEL = {
+  open: "Open",
+  accepted: "Accepted",
+  pending_user_resolution: "Waiting for user",
+  pending_follow_up: "Pending follow-up",
+  solved_closed: "Solved",
+  not_solved_closed: "Not solved",
+  closed_by_team: "Closed by team",
+  expired: "Expired"
 };
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -915,7 +927,7 @@ function renderTicketMessages(row) {
 }
 
 function renderTicketRow(row) {
-  const status = pill(TICKET_STATUS_PILL[row.status] || "pill-slate", row.status);
+  const status = pill(TICKET_STATUS_PILL[row.status] || "pill-slate", TICKET_STATUS_LABEL[row.status] || row.status);
   const assigned = row.assigned_member_name || "—";
   const scheduled = row.scheduled_member_name || "—";
   const coverage = row.covered_for_member_name
@@ -945,6 +957,7 @@ function renderTicketRow(row) {
       <td>
         <div class="font-medium">${escapeHtml(row.opened_by_name)}</div>
         <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(row.opened_message_text)}</div>
+        <div class="mt-1 text-[11px] text-slate-400">Conversation is hidden until you click View history.</div>
       </td>
       <td>${status}</td>
       <td>${escapeHtml(scheduled)}</td>
@@ -963,6 +976,18 @@ function renderTicketRow(row) {
   `;
 }
 
+function updateTicketQueueButtons() {
+  for (const button of $all(".ticket-queue-btn")) {
+    const status = button.dataset.ticketStatus || "";
+    const isActive = state.tickets.filters.status === status;
+    button.classList.toggle("bg-teal-600", isActive);
+    button.classList.toggle("text-white", isActive);
+    button.classList.toggle("border-teal-600", isActive);
+    button.classList.toggle("bg-white", !isActive);
+    button.classList.toggle("dark:bg-slate-900", !isActive);
+  }
+}
+
 function renderTickets() {
   const tbody = $("#tickets-body");
   const rows = state.tickets.rows;
@@ -971,6 +996,10 @@ function renderTickets() {
   } else {
     tbody.innerHTML = rows.map(renderTicketRow).join("");
   }
+  updateTicketQueueButtons();
+  const solvedCount = rows.filter((row) => row.status === "solved_closed").length;
+  const notSolvedCount = rows.filter((row) => row.status === "not_solved_closed").length;
+  const pendingFollowUpCount = rows.filter((row) => row.status === "pending_follow_up").length;
   const coverageCount = rows.filter((row) => row.covered_for_member_id).length;
   const offDutyCount = rows.filter((row) => row.accepted_member_was_timed_in === false).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
@@ -982,7 +1011,7 @@ function renderTickets() {
     : state.tickets.filters.telegram_chat_id
       ? `Chat ${state.tickets.filters.telegram_chat_id}`
       : "All groups";
-  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
+  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${solvedCount} solved · ${notSolvedCount} not solved · ${pendingFollowUpCount} pending follow-up · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
 }
 
 async function loadTickets() {
@@ -1132,6 +1161,13 @@ async function init() {
     state.tickets.filters.status = e.target.value;
     loadTickets();
   });
+  for (const button of $all(".ticket-queue-btn")) {
+    button.addEventListener("click", () => {
+      state.tickets.filters.status = button.dataset.ticketStatus || "";
+      $("#tickets-status").value = state.tickets.filters.status;
+      loadTickets();
+    });
+  }
   $("#tickets-group-filter").addEventListener("change", (e) => {
     state.tickets.filters.telegram_chat_id = e.target.value;
     loadTickets();

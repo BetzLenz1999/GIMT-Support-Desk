@@ -630,8 +630,23 @@
         <div class="mb-4 flex items-start justify-between gap-3 flex-wrap">
           <div class="max-w-2xl">
             <h2 class="text-base font-semibold">Support Tickets</h2>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Filter by group, date, assigned responder, scheduled duty owner, or status.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Filter by group, date, assigned responder, scheduled duty owner, or status. Conversations stay hidden until you click a ticket history link.</p>
           </div>
+        </div>
+
+        <div class="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3" aria-label="Ticket resolution queues">
+          <button type="button" class="ticket-queue-btn rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-3 text-left shadow-sm transition" data-ticket-status="pending_follow_up">
+            <div class="text-sm font-semibold">Pending Follow-up</div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">No user response after 30 minutes; reopen this same ticket when the requester messages again.</p>
+          </button>
+          <button type="button" class="ticket-queue-btn rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-3 text-left shadow-sm transition" data-ticket-status="solved_closed">
+            <div class="text-sm font-semibold">Solved Tickets</div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Only tickets confirmed as solved by the requester.</p>
+          </button>
+          <button type="button" class="ticket-queue-btn rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-3 text-left shadow-sm transition" data-ticket-status="not_solved_closed">
+            <div class="text-sm font-semibold">Not Solved Tickets</div>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Only tickets marked not solved for review.</p>
+          </button>
         </div>
         <div class="filter-panel rounded-2xl p-3 mb-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
@@ -663,10 +678,11 @@
                 <option value="">All</option>
                 <option value="open">open</option>
                 <option value="accepted">accepted</option>
-                <option value="pending_user_resolution">pending_user_resolution</option>
-                <option value="solved_closed">solved_closed</option>
-                <option value="not_solved_closed">not_solved_closed</option>
-                <option value="closed_by_team">closed_by_team</option>
+                <option value="pending_user_resolution">Waiting for user</option>
+                <option value="pending_follow_up">Pending Follow-up</option>
+                <option value="solved_closed">Solved</option>
+                <option value="not_solved_closed">Not Solved</option>
+                <option value="closed_by_team">Closed by team</option>
                 <option value="expired">expired</option>
               </select>
             </label>
