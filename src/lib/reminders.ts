@@ -376,7 +376,7 @@ async function sweepPendingSupportTicketResolutionPrompts(
       }
     });
 
-    const text = `⏳ Ticket #${ticketLabel(updatedTicket)} moved to Pending Follow-up. No Solved / Not Solved response was received within 30 minutes. If ${ticket.opened_by_name} still needs help, they can send a new message and this same ticket will reopen instead of creating a new one.`;
+    const text = `⏳ Ticket #${ticketLabel(updatedTicket)} has been moved to Pending Follow-up because no response was received within 30 minutes.\nIf ${ticket.opened_by_name} still needs help, they can reply here and the same ticket will reopen automatically.`;
     try {
       const sent = await sendMessage(ticket.telegram_chat_id, text, { replyToMessageId: ticket.opened_message_id });
       await recordSupportTicketMessage(db, {
@@ -388,6 +388,9 @@ async function sweepPendingSupportTicketResolutionPrompts(
         sender_name: "Bot",
         sender_type: "bot",
         message_text: text,
+        attachment_type: null,
+        attachment_url: null,
+        attachment_name: null,
         message_date_utc: movedAt
       });
     } catch (error) {

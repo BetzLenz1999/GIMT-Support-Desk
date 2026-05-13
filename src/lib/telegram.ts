@@ -115,6 +115,26 @@ export async function answerCallbackQuery(
   });
 }
 
+export type TelegramFile = {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+};
+
+export async function getFile(fileId: string): Promise<TelegramFile> {
+  return telegramApi<TelegramFile>("getFile", { file_id: fileId });
+}
+
+export async function downloadFile(filePath: string): Promise<ArrayBuffer> {
+  const token = requireEnv("TELEGRAM_BOT_TOKEN");
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!response.ok) {
+    throw new Error(`Telegram file download failed ${response.status}: ${await response.text()}`);
+  }
+  return response.arrayBuffer();
+}
+
 export type TelegramBotInfo = {
   id: number;
   is_bot: boolean;

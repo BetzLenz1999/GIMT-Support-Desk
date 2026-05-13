@@ -36,7 +36,7 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { answerCallbackQuery, deleteMessage, editMessageText, sendMessage } from "./telegram.js";
+import { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -326,7 +326,88 @@ function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string 
 }
 
 function supportMessageText(message: TelegramMessage): string {
-  return message.text?.trim() || "[non-text message]";
+  const text = message.text?.trim() || message.caption?.trim();
+  if (text) return text;
+  if (message.photo?.length) return "[photo]";
+  if (message.document) return message.document.file_name ? `[file: ${message.document.file_name}]` : "[file]";
+  return "[non-text message]";
+}
+
+type SupportTicketMessageContent = {
+  message_text: string;
+  attachment_type: string | null;
+  attachment_url: string | null;
+  attachment_name: string | null;
+};
+
+const SUPPORT_TICKET_STORAGE_BUCKET = process.env.SUPPORT_TICKET_STORAGE_BUCKET || "support-ticket-attachments";
+
+function attachmentExtension(filePath: string | undefined, fallback: string): string {
+  const match = filePath?.match(/\.[a-z0-9]+(?:\?|$)/i);
+  return match ? match[0].replace("?", "") : fallback;
+}
+
+async function buildSupportTicketMessageContent(
+  db: SupabaseRestClient,
+  ticketId: string,
+  message: TelegramMessage
+): Promise<SupportTicketMessageContent> {
+  const baseText = supportMessageText(message);
+  const largestPhoto = message.photo?.slice().sort((a, b) => (b.file_size ?? 0) - (a.file_size ?? 0))[0];
+  const attachment = largestPhoto
+    ? {
+        fileId: largestPhoto.file_id,
+        uniqueId: largestPhoto.file_unique_id,
+        type: "photo",
+        name: `photo-${message.message_id}.jpg`,
+        contentType: "image/jpeg",
+        fallbackExtension: ".jpg"
+      }
+    : message.document
+      ? {
+          fileId: message.document.file_id,
+          uniqueId: message.document.file_unique_id,
+          type: message.document.mime_type?.startsWith("image/") ? "image" : "file",
+          name: message.document.file_name ?? `file-${message.message_id}`,
+          contentType: message.document.mime_type ?? "application/octet-stream",
+          fallbackExtension: ""
+        }
+      : null;
+
+  if (!attachment) {
+    return {
+      message_text: baseText,
+      attachment_type: null,
+      attachment_url: null,
+      attachment_name: null
+    };
+  }
+
+  try {
+    const telegramFile = await getFile(attachment.fileId);
+    if (!telegramFile.file_path) throw new Error("Telegram did not return a file_path");
+
+    const body = await downloadFile(telegramFile.file_path);
+    const extension = attachmentExtension(telegramFile.file_path, attachment.fallbackExtension);
+    const safeName = attachment.name.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || `${attachment.type}-${message.message_id}`;
+    const path = `${ticketId}/${message.message_id}-${attachment.uniqueId}${extension && !safeName.endsWith(extension) ? extension : ""}`;
+    await db.uploadObject(SUPPORT_TICKET_STORAGE_BUCKET, path, body, attachment.contentType);
+
+    return {
+      message_text: baseText,
+      attachment_type: attachment.type,
+      attachment_url: db.getPublicObjectUrl(SUPPORT_TICKET_STORAGE_BUCKET, path),
+      attachment_name: safeName
+    };
+  } catch (error) {
+    console.warn(`Failed to save support ticket attachment for ticket ${ticketId}: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      message_text: baseText,
+      attachment_type: null,
+      attachment_url: null,
+      attachment_name: null
+    };
+  }
 }
 
 function buildTeamMemberMention(registration: Registration | null, fallbackName: string): string {
@@ -406,6 +487,7 @@ async function recordCustomerTicketFollowUp(
   user: TelegramUser
 ): Promise<void> {
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
+  const content = await buildSupportTicketMessageContent(db, ticket.id, message);
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -414,7 +496,7 @@ async function recordCustomerTicketFollowUp(
     telegram_user_id: user.id,
     sender_name: ticket.opened_by_name || getTelegramUserDisplayName(user),
     sender_type: "customer",
-    message_text: supportMessageText(message),
+    ...content,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -471,6 +553,7 @@ async function recordTeamTicketReplyIfReferenced(
   if (!ticket) return;
 
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
+  const content = await buildSupportTicketMessageContent(db, ticket.id, message);
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -479,7 +562,7 @@ async function recordTeamTicketReplyIfReferenced(
     telegram_user_id: registration.telegram_user_id,
     sender_name: registration.member_name,
     sender_type: "team_member",
-    message_text: supportMessageText(message),
+    ...content,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -643,6 +726,10 @@ async function openSupportTicket(
     closed_at: null
   });
 
+  const openingContent = options.concernText
+    ? { message_text: concernText, attachment_type: null, attachment_url: null, attachment_name: null }
+    : await buildSupportTicketMessageContent(db, ticket.id, message);
+
   await recordSupportTicketMessage(db, {
     ticket_id: ticket.id,
     telegram_chat_id: message.chat.id,
@@ -651,7 +738,7 @@ async function openSupportTicket(
     telegram_user_id: user.id,
     sender_name: openedByName,
     sender_type: "customer",
-    message_text: concernText,
+    ...openingContent,
     message_date_utc: messageDate.toISOString()
   });
 
@@ -699,6 +786,9 @@ An available team member can handle this ticket.`;
     sender_name: "Bot",
     sender_type: "bot",
     message_text: promptText,
+    attachment_type: null,
+    attachment_url: null,
+    attachment_name: null,
     message_date_utc: new Date().toISOString()
   });
 }
@@ -948,6 +1038,9 @@ async function recordBotTicketMessage(
     sender_name: "Bot",
     sender_type: "bot",
     message_text: text,
+    attachment_type: null,
+    attachment_url: null,
+    attachment_name: null,
     message_date_utc: new Date().toISOString()
   });
 }
