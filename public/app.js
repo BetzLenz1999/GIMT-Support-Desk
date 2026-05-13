@@ -104,6 +104,20 @@ function escapeHtml(value) {
   }[ch]));
 }
 
+function decodeHtmlEntities(value) {
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = String(value ?? "");
+  return textarea.value;
+}
+
+function ticketMessageDisplayText(value) {
+  return String(value ?? "")
+    .replace(/<a\b[^>]*\bhref\s*=\s*(["'])tg:\/\/user\?id=\d+\1[^>]*>([\s\S]*?)<\/a>/gi, (_match, _quote, label) =>
+      decodeHtmlEntities(String(label).replace(/<[^>]*>/g, ""))
+    )
+    .replace(/tg:\/\/user\?id=\d+/gi, "Telegram user");
+}
+
 function fmtTimeUtc(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -919,7 +933,7 @@ function renderTicketMessages(row) {
             <span><strong>${escapeHtml(message.sender_name)}</strong> · ${escapeHtml(message.sender_type)}</span>
             <span class="mono whitespace-nowrap">${escapeHtml(fmtTimeUtc(message.message_date_utc))}</span>
           </div>
-          <div class="mt-1 text-sm whitespace-pre-wrap break-words">${escapeHtml(message.message_text)}</div>
+          <div class="mt-1 text-sm whitespace-pre-wrap break-words">${escapeHtml(ticketMessageDisplayText(message.message_text))}</div>
         </div>
       `).join("")}
     </div>
