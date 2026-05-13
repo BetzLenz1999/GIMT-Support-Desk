@@ -666,16 +666,23 @@ async function openSupportTicket(
     metadata: { groupTitle: message.chat.title ?? null, concern: concernText }
   });
 
+  const ticketSaveReminder = `Your ticket #${ticketLabel(ticket)} has been created. Please save this ticket number in case the issue is not resolved and you need to follow up in the future.`;
   const promptText = scheduledMemberIsActive && scheduledMember
     ? `Hi! This is ${escapeHtmlForMention(scheduledMember.name)} from GIMT Desk Support. How can I help you?
-Ticket #${ticketLabel(ticket)} created.
+
+${ticketSaveReminder}
+
 ${buildTeamMemberMention(scheduledRegistration, scheduledMember.name)} is currently assigned to assist you.`
     : scheduledMember
       ? `Hi! This is GIMT Desk Support. How can I help you?
-Ticket #${ticketLabel(ticket)} created.
+
+${ticketSaveReminder}
+
 ${escapeHtmlForMention(scheduledMember.name)} is the scheduled support member for this time.`
       : `Hi! This is GIMT Desk Support. How can I help you?
-Ticket #${ticketLabel(ticket)} created.
+
+${ticketSaveReminder}
+
 An available team member can handle this ticket.`;
   const sent = await sendMessage(message.chat.id, promptText, {
     parseMode: "HTML",
@@ -815,7 +822,11 @@ async function handleTicketResolutionRequest(
   await deleteCallbackMessage(chatId, callback);
   await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
 
-  const text = `${ticket.opened_by_name}, was your issue resolved for ticket #${ticketLabel(ticket)}?`;
+  const text = `${ticket.opened_by_name}, was your issue resolved for ticket #${ticketLabel(ticket)}?
+
+If your issue has been solved by our support team, please press ✅ Solved to close this ticket.
+
+If your issue has not been solved, please press ❌ Not Solved to close this ticket and mark it for review.`;
   const sent = await sendMessage(chatId, text, {
     replyToMessageId: ticket.opened_message_id,
     replyMarkup: ticketUserResolutionKeyboard(ticket.id)
