@@ -36,7 +36,7 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
+import { TelegramApiError, answerCallbackQuery, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -560,19 +560,24 @@ async function handleTicketResolutionCommand(
     return;
   }
 
-  if (ticket.accepted_by_telegram_user_id !== registration.telegram_user_id) {
-    await sendMessage(message.chat.id, "Only the assigned team member can ask this.", {
-      replyToMessageId: message.message_id
-    });
-    return;
-  }
+  const actorTelegramUserId = ticket.accepted_by_telegram_user_id ?? registration.telegram_user_id;
+  const actorName = ticket.assigned_member_name ?? registration.member_name;
+  const triggeredByAssignedMember = ticket.accepted_by_telegram_user_id === registration.telegram_user_id;
 
   await requestTicketResolutionFromUser(db, ticket, {
-    actorTelegramUserId: registration.telegram_user_id,
-    actorName: registration.member_name,
+    actorTelegramUserId,
+    actorName,
     chatId: message.chat.id,
     triggerMessageId: message.message_id,
-    promptReplyToMessageId: replyToMessageId
+    promptReplyToMessageId: replyToMessageId,
+    metadata: {
+      triggeredByTelegramUserId: registration.telegram_user_id,
+      triggeredByMemberId: registration.member_id,
+      triggeredByMemberName: registration.member_name,
+      triggeredByAssignedMember,
+      loggedAssistantTelegramUserId: actorTelegramUserId,
+      loggedAssistantName: actorName
+    }
   });
 
   await deleteMessage(message.chat.id, message.message_id);
@@ -989,6 +994,7 @@ type TicketResolutionRequestOptions = {
   triggerMessageId: number | null;
   promptReplyToMessageId: number;
   preserveBotMessageId?: number;
+  metadata?: Record<string, unknown>;
 };
 
 async function requestTicketResolutionFromUser(
@@ -1010,7 +1016,7 @@ async function requestTicketResolutionFromUser(
     actor_type: "team_member",
     telegram_chat_id: options.chatId,
     telegram_message_id: options.triggerMessageId,
-    metadata: {}
+    metadata: options.metadata ?? {}
   });
 
   await removePreviousTicketBotPrompts(db, ticket, options.chatId, { exceptMessageId: options.preserveBotMessageId });
@@ -1096,8 +1102,29 @@ async function handleTicketUserResolution(
   const text = solved
     ? `✅ Ticket #${ticketLabel(updatedTicket)} closed as solved. Thank you!`
     : `❌ Ticket #${ticketLabel(updatedTicket)} closed as not solved. The team can review this in ticket history.`;
-  const sent = await sendMessage(chatId, text, { replyToMessageId: ticket.opened_message_id });
-  await recordBotTicketMessage(db, updatedTicket, sent.message_id, ticket.opened_message_id, text, chatId);
+  await sendAndRecordTicketClosureMessage(db, updatedTicket, chatId, text);
+}
+
+async function sendAndRecordTicketClosureMessage(
+  db: SupabaseRestClient,
+  ticket: SupportTicket,
+  chatId: number,
+  text: string
+): Promise<void> {
+  try {
+    const sent = await sendMessage(chatId, text, { replyToMessageId: ticket.opened_message_id });
+    await recordBotTicketMessage(db, ticket, sent.message_id, ticket.opened_message_id, text, chatId);
+    return;
+  } catch (error) {
+    if (!(error instanceof TelegramApiError)) throw error;
+
+    console.warn(
+      `Could not reply to ticket ${ticket.id} opener message ${ticket.opened_message_id}; sending closure confirmation without a reply target: ${error.description}`
+    );
+  }
+
+  const sent = await sendMessage(chatId, text);
+  await recordBotTicketMessage(db, ticket, sent.message_id, null, text, chatId);
 }
 
 async function isRegistrationTimedIn(
@@ -1128,7 +1155,7 @@ async function recordBotTicketMessage(
   db: SupabaseRestClient,
   ticket: SupportTicket,
   telegramMessageId: number,
-  replyToMessageId: number,
+  replyToMessageId: number | null,
   text: string,
   chatId: number
 ): Promise<void> {

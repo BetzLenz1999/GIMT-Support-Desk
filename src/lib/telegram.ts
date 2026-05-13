@@ -116,13 +116,33 @@ export async function editMessageText(
   text: string,
   options: SendMessageOptions = {}
 ) {
-  return telegramApi("editMessageText", {
-    chat_id: chatId,
-    message_id: messageId,
-    text,
-    parse_mode: options.parseMode,
-    reply_markup: options.replyMarkup
-  });
+  try {
+    return await telegramApi("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: options.parseMode,
+      reply_markup: options.replyMarkup
+    });
+  } catch (error) {
+    if (!(error instanceof TelegramApiError)) throw error;
+
+    const description = error.description.toLowerCase();
+    if (description.includes("message is not modified")) return false;
+
+    if (
+      description.includes("message to edit not found") ||
+      description.includes("message can't be edited") ||
+      description.includes("message_id_invalid")
+    ) {
+      console.warn(
+        `editMessageText failed for chat ${chatId} message ${messageId}; sending a new message instead: ${error.description}`
+      );
+      return sendMessage(chatId, text, options);
+    }
+
+    throw error;
+  }
 }
 
 export type AnswerCallbackOptions = {
@@ -134,11 +154,18 @@ export async function answerCallbackQuery(
   text?: string,
   options: AnswerCallbackOptions = {}
 ) {
-  return telegramApi("answerCallbackQuery", {
-    callback_query_id: callbackQueryId,
-    text,
-    show_alert: options.showAlert
-  });
+  try {
+    return await telegramApi("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: options.showAlert
+    });
+  } catch (error) {
+    if (!(error instanceof TelegramApiError)) throw error;
+
+    console.warn(`answerCallbackQuery failed for callback ${callbackQueryId}: ${error.description}`);
+    return false;
+  }
 }
 
 export type TelegramBotInfo = {
