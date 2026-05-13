@@ -453,9 +453,12 @@ export async function updateSupportTicket(
 
 export async function recordSupportTicketMessage(
   db: SupabaseRestClient,
-  payload: Omit<SupportTicketMessage, "id" | "created_at">
+  payload: Omit<SupportTicketMessage, "id" | "created_at" | "attachments"> & Pick<Partial<SupportTicketMessage>, "attachments">
 ): Promise<SupportTicketMessage> {
-  return single(await db.insert<SupportTicketMessage>("support_ticket_messages", payload));
+  return single(await db.insert<SupportTicketMessage>("support_ticket_messages", {
+    ...payload,
+    attachments: payload.attachments ?? []
+  }));
 }
 
 export async function recordSupportTicketEvent(

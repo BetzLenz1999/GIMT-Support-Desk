@@ -318,3 +318,10 @@ alter table if exists public.support_tickets
   add constraint support_tickets_status_check check (
     status in ('open', 'accepted', 'pending_user_resolution', 'pending_follow_up', 'solved_closed', 'not_solved_closed', 'closed_by_team', 'expired')
   );
+
+insert into storage.buckets (id, name, public)
+values ('support-ticket-attachments', 'support-ticket-attachments', true)
+on conflict (id) do update set public = excluded.public;
+
+alter table if exists public.support_ticket_messages
+  add column if not exists attachments jsonb not null default '[]'::jsonb;

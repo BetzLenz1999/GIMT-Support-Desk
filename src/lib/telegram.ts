@@ -42,6 +42,32 @@ async function telegramApi<T>(method: string, payload: Record<string, unknown>):
   return data.result as T;
 }
 
+
+export type TelegramFile = {
+  file_id: string;
+  file_unique_id?: string;
+  file_size?: number;
+  file_path?: string;
+};
+
+export async function getFile(fileId: string): Promise<TelegramFile> {
+  return telegramApi<TelegramFile>("getFile", { file_id: fileId });
+}
+
+export async function downloadFile(filePath: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  const token = requireEnv("TELEGRAM_BOT_TOKEN");
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new TelegramApiError("downloadFile", `${response.status} ${response.statusText}: ${errorText}`);
+  }
+
+  return {
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    contentType: response.headers.get("content-type")
+  };
+}
+
 export type SentTelegramMessage = {
   message_id: number;
   chat: { id: number };
