@@ -111,11 +111,14 @@ function decodeHtmlEntities(value) {
 }
 
 function ticketMessageDisplayText(value) {
-  return String(value ?? "")
+  const decoded = decodeHtmlEntities(String(value ?? ""));
+  return decoded
+    .replace(/^\[non-text message\]$/i, "Attachment or media message")
     .replace(/<a\b[^>]*\bhref\s*=\s*(["'])tg:\/\/user\?id=\d+\1[^>]*>([\s\S]*?)<\/a>/gi, (_match, _quote, label) =>
       decodeHtmlEntities(String(label).replace(/<[^>]*>/g, ""))
     )
-    .replace(/tg:\/\/user\?id=\d+/gi, "Telegram user");
+    .replace(/tg:\/\/user\?id=\d+/gi, "Telegram user")
+    .replace(/<\/?[^>]+>/g, "");
 }
 
 function fmtTimeUtc(iso) {
@@ -970,7 +973,7 @@ function renderTicketRow(row) {
       </td>
       <td>
         <div class="font-medium">${escapeHtml(row.opened_by_name)}</div>
-        <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(row.opened_message_text)}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">${escapeHtml(ticketMessageDisplayText(row.opened_message_text))}</div>
         <div class="mt-1 text-[11px] text-slate-400">Conversation is hidden until you click View history.</div>
       </td>
       <td>${status}</td>

@@ -326,7 +326,26 @@ function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string 
 }
 
 function supportMessageText(message: TelegramMessage): string {
-  return message.text?.trim() || "[non-text message]";
+  return message.text?.trim() || "Attachment or media message";
+}
+
+function decodeHtmlForHistory(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'");
+}
+
+function ticketMessageHistoryText(text: string): string {
+  return text
+    .replace(/<a\b[^>]*\bhref\s*=\s*(["'])tg:\/\/user\?id=\d+\1[^>]*>([\s\S]*?)<\/a>/gi, (_match, _quote, label) =>
+      decodeHtmlForHistory(String(label).replace(/<[^>]*>/g, ""))
+    )
+    .replace(/tg:\/\/user\?id=\d+/gi, "Telegram user")
+    .replace(/<\/?[^>]+>/g, "")
+    .trim();
 }
 
 function buildTeamMemberMention(registration: Registration | null, fallbackName: string): string {
@@ -698,7 +717,7 @@ An available team member can handle this ticket.`;
     telegram_user_id: null,
     sender_name: "Bot",
     sender_type: "bot",
-    message_text: promptText,
+    message_text: ticketMessageHistoryText(promptText),
     message_date_utc: new Date().toISOString()
   });
 }
@@ -947,7 +966,7 @@ async function recordBotTicketMessage(
     telegram_user_id: null,
     sender_name: "Bot",
     sender_type: "bot",
-    message_text: text,
+    message_text: ticketMessageHistoryText(text),
     message_date_utc: new Date().toISOString()
   });
 }
