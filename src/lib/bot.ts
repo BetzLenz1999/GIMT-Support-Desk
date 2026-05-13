@@ -1,5 +1,5 @@
 import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket } from "./supabase.js";
-import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, supportConcernKeyboard, ticketAcceptKeyboard, ticketResolutionRequestKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
+import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketAcceptKeyboard, ticketResolutionRequestKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
   createActivity,
@@ -148,23 +148,8 @@ async function trackGroupMessage(
       return;
     }
 
-    const state = await getConversationState(db, user.id);
-    if (state?.state === "awaiting_support_concern_other") {
-      await clearConversationState(db, user.id);
-      await deleteStoredSupportPromptMessage(message.chat.id, state.payload);
-      await openSupportTicket(db, message, user, {
-        concernText: `Other: ${supportMessageText(message)}`
-      });
-      return;
-    }
-
-    if (state?.state === "awaiting_support_concern") {
-      await deleteStoredSupportPromptMessage(message.chat.id, state.payload);
-      await promptSupportConcernSelection(db, message, user);
-      return;
-    }
-
-    await promptSupportConcernSelection(db, message, user);
+    await clearConversationState(db, user.id);
+    await openSupportTicket(db, message, user);
     return;
   }
 
@@ -344,45 +329,15 @@ function supportMessageText(message: TelegramMessage): string {
   return message.text?.trim() || "[non-text message]";
 }
 
+function buildTeamMemberMention(registration: Registration | null, fallbackName: string): string {
+  if (!registration) return escapeHtmlForMention(fallbackName);
+  return `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
+}
+
 type SupportTicketOpenOptions = {
   concernText?: string;
   sourceMessageId?: number;
 };
-
-const SUPPORT_CONCERN_LABELS: Record<string, string> = {
-  goodwallet: "GoodWallet",
-  gooddapp: "GoodDapp"
-};
-
-async function promptSupportConcernSelection(
-  db: SupabaseRestClient,
-  message: TelegramMessage,
-  user: TelegramUser
-): Promise<void> {
-  await rememberTelegramGroup(db, message.chat);
-
-  const name = getTelegramUserDisplayName(user);
-  const sent = await sendMessage(
-    message.chat.id,
-    `${name}, what kind of concern is this? Please choose one below before I open a support ticket.`,
-    {
-      replyToMessageId: message.message_id,
-      replyMarkup: supportConcernKeyboard(message.message_id, user.id)
-    }
-  );
-
-  await setConversationState(db, user.id, "awaiting_support_concern", {
-    telegram_chat_id: message.chat.id,
-    source_message_id: message.message_id,
-    prompt_message_id: sent.message_id
-  });
-}
-
-async function deleteStoredSupportPromptMessage(chatId: number, payload: Record<string, unknown>): Promise<void> {
-  const promptMessageId = typeof payload.prompt_message_id === "number" ? payload.prompt_message_id : null;
-  const promptChatId = typeof payload.telegram_chat_id === "number" ? payload.telegram_chat_id : chatId;
-  if (promptMessageId) await deleteMessage(promptChatId, promptMessageId);
-}
 
 async function deleteCallbackMessage(chatId: number, callback: TelegramCallbackQuery): Promise<void> {
   const messageId = callback.message?.message_id;
@@ -504,6 +459,121 @@ async function recordTeamTicketReplyIfReferenced(
     message_text: supportMessageText(message),
     message_date_utc: messageDate.toISOString()
   });
+
+  if (shouldConnectReplyToTeamMember(ticket, registration)) {
+    await connectTicketToTeamMember(db, ticket, registration, {
+      chatId: message.chat.id,
+      telegramMessageId: message.message_id,
+      replyToMessageId: ticket.opened_message_id,
+      eventType: ticket.status === "open" ? "ticket_accepted" : "ticket_handler_reassigned"
+    });
+  }
+}
+
+function getTicketScheduledMember(ticket: SupportTicket): Pick<TeamMember, "id" | "name"> | null {
+  if (ticket.scheduled_member_id && ticket.scheduled_member_name) {
+    return { id: ticket.scheduled_member_id, name: ticket.scheduled_member_name };
+  }
+  return findScheduledMemberAt(new Date(ticket.created_at));
+}
+
+function shouldConnectReplyToTeamMember(ticket: SupportTicket, registration: Registration): boolean {
+  if (isTicketClosed(ticket) || ticket.status === "pending_user_resolution") return false;
+  if (!ticket.assigned_member_id) return true;
+  if (ticket.assigned_member_id === registration.member_id) return false;
+
+  const scheduledMember = getTicketScheduledMember(ticket);
+  return Boolean(scheduledMember && ticket.assigned_member_id === scheduledMember.id);
+}
+
+type TicketConnectionOptions = {
+  chatId: number;
+  telegramMessageId: number | null;
+  replyToMessageId: number;
+  eventType?: "ticket_accepted" | "ticket_handler_reassigned";
+};
+
+async function connectTicketToTeamMember(
+  db: SupabaseRestClient,
+  ticket: SupportTicket,
+  registration: Registration,
+  options: TicketConnectionOptions
+): Promise<SupportTicket> {
+  const member = getTeamMember(registration.member_id);
+  if (!member) return ticket;
+
+  const acceptedAt = new Date();
+  const now = acceptedAt.toISOString();
+  const wasTimedIn = await isRegistrationTimedIn(db, registration, member);
+  const acceptedDuringOwnShift = isMemberScheduledAt(member, acceptedAt);
+  const scheduledMember = getTicketScheduledMember(ticket);
+  const coveredForMember = scheduledMember && scheduledMember.id !== registration.member_id ? scheduledMember : null;
+  const eventType = options.eventType ?? "ticket_accepted";
+
+  const updatedTicket = await updateSupportTicket(db, ticket.id, {
+    status: "accepted",
+    assigned_member_id: registration.member_id,
+    assigned_member_name: registration.member_name,
+    scheduled_member_id: scheduledMember?.id ?? null,
+    scheduled_member_name: scheduledMember?.name ?? null,
+    accepted_by_telegram_user_id: registration.telegram_user_id,
+    accepted_member_was_timed_in: wasTimedIn,
+    accepted_during_own_shift: acceptedDuringOwnShift,
+    covered_for_member_id: coveredForMember?.id ?? null,
+    covered_for_member_name: coveredForMember?.name ?? null,
+    accepted_at: now
+  });
+
+  await recordSupportTicketEvent(db, {
+    ticket_id: ticket.id,
+    event_type: eventType,
+    actor_telegram_user_id: registration.telegram_user_id,
+    actor_name: registration.member_name,
+    actor_type: "team_member",
+    telegram_chat_id: options.chatId,
+    telegram_message_id: options.telegramMessageId,
+    metadata: {
+      memberId: registration.member_id,
+      acceptedMemberWasTimedIn: wasTimedIn,
+      acceptedDuringOwnShift,
+      scheduledMemberId: scheduledMember?.id ?? null,
+      scheduledMemberName: scheduledMember?.name ?? null,
+      coveredForMemberId: coveredForMember?.id ?? null,
+      coveredForMemberName: coveredForMember?.name ?? null
+    }
+  });
+
+  if (coveredForMember || !wasTimedIn || !acceptedDuringOwnShift) {
+    await recordSupportTicketEvent(db, {
+      ticket_id: ticket.id,
+      event_type: "ticket_coverage_logged",
+      actor_telegram_user_id: registration.telegram_user_id,
+      actor_name: registration.member_name,
+      actor_type: "team_member",
+      telegram_chat_id: options.chatId,
+      telegram_message_id: options.telegramMessageId,
+      metadata: {
+        acceptedMemberWasTimedIn: wasTimedIn,
+        acceptedDuringOwnShift,
+        scheduledMemberId: scheduledMember?.id ?? null,
+        scheduledMemberName: scheduledMember?.name ?? null,
+        coveredForMemberId: coveredForMember?.id ?? null,
+        coveredForMemberName: coveredForMember?.name ?? null
+      }
+    });
+  }
+
+  const text = coveredForMember
+    ? `Update: ${coveredForMember.name} is the scheduled support member, but ${registration.member_name} is now assisting on this ticket.
+Ticket #${ticketLabel(updatedTicket)} is now connected to ${registration.member_name} for handling.`
+    : `${registration.member_name} is now assisting on ticket #${ticketLabel(updatedTicket)}.`;
+  const sent = await sendMessage(options.chatId, text, {
+    replyToMessageId: options.replyToMessageId,
+    replyMarkup: ticketResolutionRequestKeyboard(updatedTicket.id)
+  });
+
+  await recordBotTicketMessage(db, updatedTicket, sent.message_id, options.replyToMessageId, text, options.chatId);
+  return updatedTicket;
 }
 
 async function openSupportTicket(
@@ -517,8 +587,13 @@ async function openSupportTicket(
   const openedByName = getTelegramUserDisplayName(user);
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
   const scheduledMember = findScheduledMemberAt(messageDate);
+  const scheduledRegistration = scheduledMember ? await findRegistrationByMemberId(db, scheduledMember.id) : null;
+  const scheduledMemberIsActive = scheduledMember && scheduledRegistration
+    ? await isRegistrationTimedIn(db, scheduledRegistration, scheduledMember)
+    : false;
   const sourceMessageId = options.sourceMessageId ?? message.message_id;
   const concernText = options.concernText ?? supportMessageText(message);
+  const acceptedAt = scheduledMemberIsActive ? new Date().toISOString() : null;
   const ticket = await createSupportTicketWithCode(db, {
     telegram_chat_id: message.chat.id,
     group_title: message.chat.title ?? null,
@@ -526,17 +601,17 @@ async function openSupportTicket(
     opened_by_name: openedByName,
     opened_message_id: sourceMessageId,
     opened_message_text: concernText,
-    status: "open",
-    assigned_member_id: null,
-    assigned_member_name: null,
+    status: scheduledMemberIsActive ? "accepted" : "open",
+    assigned_member_id: scheduledMemberIsActive ? scheduledMember?.id ?? null : null,
+    assigned_member_name: scheduledMemberIsActive ? scheduledMember?.name ?? null : null,
     scheduled_member_id: scheduledMember?.id ?? null,
     scheduled_member_name: scheduledMember?.name ?? null,
-    accepted_by_telegram_user_id: null,
-    accepted_member_was_timed_in: null,
-    accepted_during_own_shift: null,
+    accepted_by_telegram_user_id: scheduledMemberIsActive ? scheduledRegistration?.telegram_user_id ?? null : null,
+    accepted_member_was_timed_in: scheduledMemberIsActive ? true : null,
+    accepted_during_own_shift: scheduledMemberIsActive && scheduledMember ? isMemberScheduledAt(scheduledMember, messageDate) : null,
     covered_for_member_id: null,
     covered_for_member_name: null,
-    accepted_at: null,
+    accepted_at: acceptedAt,
     resolution_requested_at: null,
     resolved_by_telegram_user_id: null,
     resolution: null,
@@ -567,10 +642,21 @@ async function openSupportTicket(
     metadata: { groupTitle: message.chat.title ?? null, concern: concernText }
   });
 
-  const promptText = `Support ticket #${ticketLabel(ticket)} opened for ${openedByName} about ${concernText}. A team member can accept this ticket.`;
+  const promptText = scheduledMemberIsActive && scheduledMember
+    ? `Hi! This is ${escapeHtmlForMention(scheduledMember.name)} from GIMT Desk Support. How can I help you?
+Ticket #${ticketLabel(ticket)} created.
+${buildTeamMemberMention(scheduledRegistration, scheduledMember.name)} is currently assigned to assist you.`
+    : scheduledMember
+      ? `Hi! This is GIMT Desk Support. How can I help you?
+Ticket #${ticketLabel(ticket)} created.
+${escapeHtmlForMention(scheduledMember.name)} is the scheduled support member for this time.`
+      : `Hi! This is GIMT Desk Support. How can I help you?
+Ticket #${ticketLabel(ticket)} created.
+An available team member can handle this ticket.`;
   const sent = await sendMessage(message.chat.id, promptText, {
+    parseMode: "HTML",
     replyToMessageId: sourceMessageId,
-    replyMarkup: ticketAcceptKeyboard(ticket.id)
+    replyMarkup: scheduledMemberIsActive ? ticketResolutionRequestKeyboard(ticket.id) : ticketAcceptKeyboard(ticket.id)
   });
 
   await recordSupportTicketMessage(db, {
@@ -584,68 +670,6 @@ async function openSupportTicket(
     message_text: promptText,
     message_date_utc: new Date().toISOString()
   });
-}
-
-async function handleSupportConcernCallback(db: SupabaseRestClient, callback: TelegramCallbackQuery): Promise<void> {
-  const data = callback.data ?? "";
-  const [, , concernKey, sourceMessageIdRaw, telegramUserIdRaw] = data.split(":");
-  const chatId = callback.message?.chat.id;
-  const sourceMessageId = Number.parseInt(sourceMessageIdRaw ?? "", 10);
-  const expectedTelegramUserId = Number.parseInt(telegramUserIdRaw ?? "", 10);
-
-  if (!chatId || !callback.message || !Number.isFinite(sourceMessageId) || !Number.isFinite(expectedTelegramUserId)) {
-    await answerCallbackQuery(callback.id, "This support prompt is invalid.", { showAlert: true });
-    return;
-  }
-
-  if (callback.from.id !== expectedTelegramUserId) {
-    await answerCallbackQuery(callback.id, "Only the requester can choose this concern type.", { showAlert: true });
-    return;
-  }
-
-  const registration = await findRegistrationByUser(db, callback.from.id);
-  if (registration) {
-    await answerCallbackQuery(callback.id, "Registered team members do not need support tickets here.", { showAlert: true });
-    return;
-  }
-
-  const activeTicket = await findActiveSupportTicketForUser(db, chatId, callback.from.id);
-  if (activeTicket) {
-    await answerCallbackQuery(callback.id, `Ticket #${ticketLabel(activeTicket)} is already active.`);
-    await deleteCallbackMessage(chatId, callback);
-    const text = ticketFollowUpText(activeTicket);
-    const sent = await sendMessage(chatId, text, {
-      replyToMessageId: sourceMessageId,
-      replyMarkup: ticketFollowUpReplyMarkup(activeTicket)
-    });
-    await recordBotTicketMessage(db, activeTicket, sent.message_id, sourceMessageId, text, chatId);
-    return;
-  }
-
-  if (concernKey === "other") {
-    await answerCallbackQuery(callback.id, "Please type your concern.");
-    await deleteCallbackMessage(chatId, callback);
-    const sent = await sendMessage(chatId, `${getTelegramUserDisplayName(callback.from)}, please type what your concern is. I will open the ticket after your next message.`, {
-      replyToMessageId: sourceMessageId
-    });
-    await setConversationState(db, callback.from.id, "awaiting_support_concern_other", {
-      telegram_chat_id: chatId,
-      source_message_id: sourceMessageId,
-      prompt_message_id: sent.message_id
-    });
-    return;
-  }
-
-  const concernText = SUPPORT_CONCERN_LABELS[concernKey];
-  if (!concernText) {
-    await answerCallbackQuery(callback.id, "Unknown concern type.", { showAlert: true });
-    return;
-  }
-
-  await clearConversationState(db, callback.from.id);
-  await answerCallbackQuery(callback.id, `Opening ${concernText} ticket.`);
-  await deleteCallbackMessage(chatId, callback);
-  await openSupportTicket(db, callback.message, callback.from, { concernText, sourceMessageId });
 }
 
 async function handleTicketCallback(db: SupabaseRestClient, callback: TelegramCallbackQuery): Promise<void> {
@@ -712,78 +736,15 @@ async function handleTicketAccept(
     return;
   }
 
-  const acceptedAt = new Date();
-  const now = acceptedAt.toISOString();
-  const wasTimedIn = await isRegistrationTimedIn(db, registration, member);
-  const acceptedDuringOwnShift = isMemberScheduledAt(member, acceptedAt);
-  const scheduledMember = ticket.scheduled_member_id && ticket.scheduled_member_name
-    ? { id: ticket.scheduled_member_id, name: ticket.scheduled_member_name }
-    : findScheduledMemberAt(new Date(ticket.created_at));
-  const coveredForMember = scheduledMember && scheduledMember.id !== registration.member_id ? scheduledMember : null;
-
-  await answerCallbackQuery(callback.id, wasTimedIn ? "Ticket accepted." : "Ticket accepted and logged as off-duty coverage.");
-  const updatedTicket = await updateSupportTicket(db, ticket.id, {
-    status: "accepted",
-    assigned_member_id: registration.member_id,
-    assigned_member_name: registration.member_name,
-    scheduled_member_id: scheduledMember?.id ?? null,
-    scheduled_member_name: scheduledMember?.name ?? null,
-    accepted_by_telegram_user_id: callback.from.id,
-    accepted_member_was_timed_in: wasTimedIn,
-    accepted_during_own_shift: acceptedDuringOwnShift,
-    covered_for_member_id: coveredForMember?.id ?? null,
-    covered_for_member_name: coveredForMember?.name ?? null,
-    accepted_at: now
-  });
-
-  await recordSupportTicketEvent(db, {
-    ticket_id: ticket.id,
-    event_type: "ticket_accepted",
-    actor_telegram_user_id: callback.from.id,
-    actor_name: registration.member_name,
-    actor_type: "team_member",
-    telegram_chat_id: chatId,
-    telegram_message_id: callback.message?.message_id ?? null,
-    metadata: {
-      memberId: registration.member_id,
-      acceptedMemberWasTimedIn: wasTimedIn,
-      acceptedDuringOwnShift,
-      scheduledMemberId: scheduledMember?.id ?? null,
-      scheduledMemberName: scheduledMember?.name ?? null,
-      coveredForMemberId: coveredForMember?.id ?? null,
-      coveredForMemberName: coveredForMember?.name ?? null
-    }
-  });
-
-  if (coveredForMember || !wasTimedIn || !acceptedDuringOwnShift) {
-    await recordSupportTicketEvent(db, {
-      ticket_id: ticket.id,
-      event_type: "ticket_coverage_logged",
-      actor_telegram_user_id: callback.from.id,
-      actor_name: registration.member_name,
-      actor_type: "team_member",
-      telegram_chat_id: chatId,
-      telegram_message_id: callback.message?.message_id ?? null,
-      metadata: {
-        acceptedMemberWasTimedIn: wasTimedIn,
-        acceptedDuringOwnShift,
-        scheduledMemberId: scheduledMember?.id ?? null,
-        scheduledMemberName: scheduledMember?.name ?? null,
-        coveredForMemberId: coveredForMember?.id ?? null,
-        coveredForMemberName: coveredForMember?.name ?? null
-      }
-    });
-  }
-
+  await answerCallbackQuery(callback.id, "Ticket accepted.");
   await deleteCallbackMessage(chatId, callback);
-
-  const text = `${registration.member_name} is now live to assist you on ticket #${ticketLabel(ticket)}!`;
-  const sent = await sendMessage(chatId, text, {
+  await connectTicketToTeamMember(db, ticket, registration, {
+    chatId,
+    telegramMessageId: callback.message?.message_id ?? null,
     replyToMessageId: ticket.opened_message_id,
-    replyMarkup: ticketResolutionRequestKeyboard(updatedTicket.id)
+    eventType: "ticket_accepted"
   });
 
-  await recordBotTicketMessage(db, updatedTicket, sent.message_id, ticket.opened_message_id, text, chatId);
 }
 
 async function handleTicketResolutionRequest(
@@ -959,23 +920,17 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
   const isGroupActionCallback =
     data.startsWith("group:time:in:") || data.startsWith("group:time:out:");
   const isTicketCallback = data.startsWith("t:");
-  const isSupportConcernCallback = data.startsWith("s:concern:");
   const isRegistrationCallback = data.startsWith("register:");
-  if (!isGroupActionCallback && !isTicketCallback && !isSupportConcernCallback && !isRegistrationCallback) {
+  if (!isGroupActionCallback && !isTicketCallback && !isRegistrationCallback) {
     await answerCallbackQuery(callback.id);
   }
 
   if (!chatId || !messageId) {
-    if (isGroupActionCallback || isTicketCallback || isSupportConcernCallback || isRegistrationCallback) await answerCallbackQuery(callback.id);
+    if (isGroupActionCallback || isTicketCallback || isRegistrationCallback) await answerCallbackQuery(callback.id);
     return;
   }
 
   if (message && isGroupChat(message.chat)) {
-    if (isSupportConcernCallback) {
-      await handleSupportConcernCallback(db, callback);
-      return;
-    }
-
     if (isTicketCallback) {
       await handleTicketCallback(db, callback);
       return;

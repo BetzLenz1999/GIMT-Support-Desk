@@ -114,18 +114,6 @@ export function groupTimeOutKeyboard(memberId: string): InlineKeyboardMarkup {
   };
 }
 
-export function supportConcernKeyboard(sourceMessageId: number, telegramUserId: number): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: "GoodWallet", callback_data: `s:concern:goodwallet:${sourceMessageId}:${telegramUserId}` },
-        { text: "GoodDapp", callback_data: `s:concern:gooddapp:${sourceMessageId}:${telegramUserId}` }
-      ],
-      [{ text: "Others", callback_data: `s:concern:other:${sourceMessageId}:${telegramUserId}` }]
-    ]
-  };
-}
-
 export function ticketAcceptKeyboard(ticketId: string): InlineKeyboardMarkup {
   return {
     inline_keyboard: [[{ text: "✅ Accept Ticket", callback_data: `t:acc:${ticketId}` }]]
