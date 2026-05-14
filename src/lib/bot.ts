@@ -9,6 +9,7 @@ import {
   findActiveSupportTicketForUser,
   findRegistrationByMemberId,
   findRegistrationByUser,
+  findSavedCommandForUser,
   findSupportTicketById,
   findTimeLog,
   listRecentBotSupportTicketMessages,
@@ -25,6 +26,7 @@ import {
   updateSupportTicket,
   updateTimeLog,
   upsertRegistration,
+  upsertSavedCommand,
   upsertTelegramGroup
 } from "./repository.js";
 import {
@@ -36,7 +38,7 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { TelegramApiError, answerCallbackQuery, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
+import { TelegramApiError, answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -155,8 +157,17 @@ async function trackGroupMessage(
 
   await rememberTelegramGroup(db, message.chat);
 
+  if (isSaveCommand(message)) {
+    await handleSaveCommand(db, message, registration);
+    return;
+  }
+
   if (isResolutionRequestCommand(message)) {
     await handleTicketResolutionCommand(db, message, registration);
+    return;
+  }
+
+  if (await handleSavedCommandPlayback(db, message, registration)) {
     return;
   }
 
@@ -249,6 +260,54 @@ function getCommand(text: string): string {
 
 function isChatIdCommand(command: string): boolean {
   return ["/chatid", "/chat_id", "/groupid", "/group_id", "/id"].includes(command);
+}
+
+const SAVED_COMMAND_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
+const RESERVED_SAVED_COMMAND_NAMES = new Set([
+  "1",
+  "chat_id",
+  "chatid",
+  "group_id",
+  "groupid",
+  "help",
+  "id",
+  "menu",
+  "save",
+  "start"
+]);
+
+function isSaveCommand(message: TelegramMessage): boolean {
+  return getCommand(message.text?.trim() ?? "") === "/save";
+}
+
+function parseSavedCommandName(rawName: string | undefined): string | null {
+  const cleaned = rawName?.trim().replace(/^\//, "").split("@")[0]?.toLowerCase() ?? "";
+  if (!SAVED_COMMAND_NAME_PATTERN.test(cleaned)) return null;
+  if (RESERVED_SAVED_COMMAND_NAMES.has(cleaned)) return null;
+  return cleaned;
+}
+
+function getSaveCommandName(message: TelegramMessage): string | null {
+  const [, rawName] = message.text?.trim().split(/\s+/, 2) ?? [];
+  return parseSavedCommandName(rawName);
+}
+
+function getDynamicSavedCommandName(message: TelegramMessage): string | null {
+  const text = message.text?.trim() ?? "";
+  if (!text.startsWith("/")) return null;
+
+  const firstToken = text.split(/\s+/, 1)[0] ?? "";
+  if (!firstToken) return null;
+
+  return parseSavedCommandName(firstToken);
+}
+
+function hasBotMention(commandText: string): boolean {
+  return commandText.includes("@");
+}
+
+function getMessagePreview(message: TelegramMessage): string | null {
+  return message.text ?? message.caption ?? null;
 }
 
 function isGroupChat(chat: TelegramChat): boolean {
@@ -532,6 +591,88 @@ async function recordCustomerTicketFollowUp(
 
 function isResolutionRequestCommand(message: TelegramMessage): boolean {
   return getCommand(message.text?.trim() ?? "") === "/1";
+}
+
+async function handleSaveCommand(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  registration: Registration
+): Promise<void> {
+  const commandName = getSaveCommandName(message);
+  if (!commandName) {
+    await sendMessage(
+      message.chat.id,
+      "Please use /save with a valid command name, like /save tutorial. Use letters, numbers, and underscores only.",
+      { replyToMessageId: message.message_id }
+    );
+    return;
+  }
+
+  const sourceMessage = message.reply_to_message;
+  if (!sourceMessage) {
+    await sendMessage(message.chat.id, `Please reply /save ${commandName} to the post you want to save.`, {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
+  if (!sourceMessage.from || sourceMessage.from.id !== registration.telegram_user_id) {
+    await sendMessage(message.chat.id, "You can only save posts that you originally sent.", {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
+  await upsertSavedCommand(db, {
+    owner_telegram_user_id: registration.telegram_user_id,
+    owner_member_id: registration.member_id,
+    owner_member_name: registration.member_name,
+    command_name: commandName,
+    source_chat_id: sourceMessage.chat.id,
+    source_message_id: sourceMessage.message_id,
+    source_message_text: getMessagePreview(sourceMessage)
+  });
+
+  await sendMessage(message.chat.id, `This is now saved! Use /${commandName} to show it again.`, {
+    replyToMessageId: message.message_id
+  });
+}
+
+async function handleSavedCommandPlayback(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  registration: Registration
+): Promise<boolean> {
+  const commandName = getDynamicSavedCommandName(message);
+  if (!commandName) return false;
+
+  const savedCommand = await findSavedCommandForUser(db, registration.telegram_user_id, commandName);
+  if (!savedCommand) {
+    const firstToken = message.text?.trim().split(/\s+/, 1)[0] ?? "";
+    if (hasBotMention(firstToken)) return false;
+
+    await sendMessage(message.chat.id, `No saved command found for /${commandName}.`, {
+      replyToMessageId: message.message_id
+    });
+    return true;
+  }
+
+  await sendMessage(message.chat.id, `This is from ${savedCommand.owner_member_name}! Here’s saved ${commandName} 👇`, {
+    replyToMessageId: message.message_id
+  });
+
+  try {
+    await copyMessage(message.chat.id, savedCommand.source_chat_id, savedCommand.source_message_id);
+  } catch (error) {
+    console.error(`Failed to copy saved command /${commandName}`, error);
+    await sendMessage(
+      message.chat.id,
+      `I found /${commandName}, but I could not repost the original message. It may have been deleted or is no longer available.`,
+      { replyToMessageId: message.message_id }
+    );
+  }
+
+  return true;
 }
 
 async function handleTicketResolutionCommand(

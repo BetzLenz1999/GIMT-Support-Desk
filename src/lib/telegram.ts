@@ -87,6 +87,22 @@ export async function sendMessage(
   });
 }
 
+export type CopiedTelegramMessage = {
+  message_id: number;
+};
+
+export async function copyMessage(
+  chatId: number,
+  fromChatId: number,
+  messageId: number
+): Promise<CopiedTelegramMessage> {
+  return telegramApi<CopiedTelegramMessage>("copyMessage", {
+    chat_id: chatId,
+    from_chat_id: fromChatId,
+    message_id: messageId
+  });
+}
+
 export async function deleteMessage(chatId: number, messageId: number): Promise<boolean> {
   try {
     await telegramApi<boolean>("deleteMessage", {
