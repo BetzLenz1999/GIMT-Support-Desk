@@ -135,11 +135,3 @@ export function ticketUserResolutionKeyboard(ticketId: string): InlineKeyboardMa
   };
 }
 
-export function aiSupportResolutionKeyboard(ticketId: string): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [[
-      { text: "✅ Yes, solved", callback_data: `ai:sol:${ticketId}` },
-      { text: "❌ No, I still need help", callback_data: `ai:help:${ticketId}` }
-    ]]
-  };
-}
