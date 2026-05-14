@@ -1135,10 +1135,8 @@ async function handleAiSupportTicketFollowUp(
   message: TelegramMessage,
   user: TelegramUser
 ): Promise<void> {
-  const messageText = supportMessageText(message);
-  const match = detectAiSupportTemplate(messageText, Boolean(message.photo?.length));
-
-  if (ticket.status === "accepted") {
+  const match = detectAiSupportTemplate(supportMessageText(message), Boolean(message.photo?.length));
+  if (ticket.status === "open" || ticket.status === "accepted") {
     await recordCustomerTicketFollowUp(db, ticket, message, user);
     return;
   }
@@ -1153,37 +1151,10 @@ async function handleAiSupportTicketFollowUp(
     telegram_user_id: user.id,
     sender_name: ticket.opened_by_name || getTelegramUserDisplayName(user),
     sender_type: "customer",
-    message_text: messageText,
+    message_text: supportMessageText(message),
     attachments,
     message_date_utc: messageDate.toISOString()
   });
-
-  if (!match.alwaysEscalate) {
-    const updatedTicket = await updateSupportTicket(db, ticket.id, {
-      status: "pending_user_resolution",
-      resolution_requested_at: new Date().toISOString()
-    });
-
-    await recordSupportTicketEvent(db, {
-      ticket_id: ticket.id,
-      event_type: "ai_support_auto_reply_follow_up",
-      actor_telegram_user_id: user.id,
-      actor_name: ticket.opened_by_name || getTelegramUserDisplayName(user),
-      actor_type: "customer",
-      telegram_chat_id: message.chat.id,
-      telegram_message_id: message.message_id,
-      metadata: { ...aiSupportMetadata(match, "Auto-Replied"), reason: "customer_follow_up_matched_auto_reply", followUpQuestion: messageText, attachments }
-    });
-
-    await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
-    const text = buildAiSupportAutoReplyText(updatedTicket, match);
-    const sent = await sendMessage(message.chat.id, text, {
-      replyToMessageId: message.message_id,
-      replyMarkup: aiSupportResolutionKeyboard(updatedTicket.id)
-    });
-    await recordBotTicketMessage(db, updatedTicket, sent.message_id, message.message_id, text, message.chat.id);
-    return;
-  }
 
   const updatedTicket = await updateSupportTicket(db, ticket.id, {
     status: "open",
@@ -1198,11 +1169,11 @@ async function handleAiSupportTicketFollowUp(
     actor_type: "customer",
     telegram_chat_id: message.chat.id,
     telegram_message_id: message.message_id,
-    metadata: { ...aiSupportMetadata(match, "Needs Moderator Review"), reason: "customer_follow_up_requires_moderator", attachments }
+    metadata: { ...aiSupportMetadata(match, "Needs Moderator Review"), reason: "customer_follow_up_after_auto_reply", attachments }
   });
 
   await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
-  const text = buildAiSupportModeratorText(updatedTicket, match);
+  const text = `Thanks for the update. A moderator will review ticket #${ticketLabel(updatedTicket)}.\n\nPlease make sure you have sent your wallet address, screenshot if available, transaction hash if available, and the exact error message.`;
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
     replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
