@@ -130,12 +130,6 @@ export type AppSetting = {
   updated_at: string;
 };
 
-export type TelegramUpdateReceipt = {
-  update_id: number;
-  update_type: string;
-  received_at: string;
-};
-
 export type GroupActionType =
   | "time_in"
   | "time_out"
