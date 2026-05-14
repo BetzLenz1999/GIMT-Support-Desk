@@ -14,6 +14,7 @@ export type AiSupportCategory =
   | "Wallet Connection Issue"
   | "MiniPay GoodDapp Swap Failed"
   | "Gas Fee Issue"
+  | "Importing Wallet / Importing G$ Token"
   | "Reward Not Received"
   | "Transaction Failed"
   | "Pending Case Follow-Up"
@@ -33,45 +34,57 @@ export type AiSupportMatch = AiSupportTemplate & {
   matchedKeywords: string[];
 };
 
-const HOW_TO_CLAIM_RESPONSE = `Hi! To claim G$, please open your GoodWallet/GoodDollar app and make sure your account is properly connected and verified.
+const HOW_TO_CLAIM_RESPONSE = `Hi! You can claim G$ using GoodWallet or GoodDapp.
 
-Then go to the claim section and follow the steps shown in the app.
+Please follow the guide that matches your setup:
 
-Please also make sure you have enough gas if the action requires a blockchain transaction.
+• Guide: How to claim G$ on GoodDapp from any Web3 wallet
+https://discourse.gooddollar.org/t/guide-how-to-claim-g-on-gooddapp-from-any-web3-wallet/8818
 
-If you still cannot claim, please send a screenshot, your wallet address, and the exact error message so a moderator can check your case.`;
+• Guide: Claiming G$ on GoodDapp using GoodWallet
+https://discourse.gooddollar.org/t/guide-claiming-g-on-gooddapp-using-goodwallet/8792
 
-const CLAIMING_FAILED_RESPONSE = `Hi! If claiming failed in GoodWallet, please check the following first:
+• Guide: How to Claim G$ on GoodWallet
+https://discourse.gooddollar.org/t/guide-how-to-claim-g-on-goodwallet/8788
 
-• Make sure your account/wallet is properly connected.
-• Make sure your face verification is completed successfully.
+If you already followed the guide but still cannot claim, please send a screenshot and the exact error message.`;
+
+const CLAIMING_FAILED_RESPONSE = `Hi! If claiming failed in GoodWallet, please check these first:
+
+• Make sure you have enough gas to claim your G$.
+• Make sure your GoodWallet is properly connected.
+• Make sure your face verification is completed.
 • Check if you already claimed for the current claim period.
-• Refresh the app and try again.
-• Make sure you have enough gas if the claim requires a blockchain transaction.
+• Refresh or reopen GoodWallet, then try again.
 
-If the issue continues, please send your wallet address, screenshot, and the exact error message so a moderator can review it.`;
+If it still fails, please send your wallet address, a screenshot, and the exact error message so a moderator can review it.`;
 
 const CANNOT_CLAIM_RESPONSE = `Hi! If you can’t claim G$, please check these common reasons:
 
+• You may need enough gas to complete the claim.
 • Your account may not be verified yet.
 • Face verification may have failed or is incomplete.
 • You may have already claimed for the current claim period.
 • Your wallet/account may not be properly connected.
 • The app may need to be refreshed or reopened.
-• You may need enough gas if the action requires a blockchain transaction.
 
 If you already checked these and still can’t claim, please send your wallet address, screenshot, and exact error message for moderator review.`;
 
-const FACE_VERIFICATION_RESPONSE = `Hi! If your face verification failed, please try the following:
+const FACE_VERIFICATION_RESPONSE = `Hi! If your face verification failed, please try these tips:
 
-• Make sure your face is clearly visible.
-• Use good lighting and avoid shadows.
-• Remove sunglasses, mask, or anything covering your face.
-• Make sure your camera permission is enabled.
+• Use bright, even lighting.
+• Keep your face centered and clearly visible.
+• Remove sunglasses, mask, hat, or anything covering your face.
+• Clean your front camera lens.
+• Make sure camera permission is enabled.
 • Use a stable internet connection.
-• Try refreshing or restarting the app before trying again.
+• Restart the app and try again.
 
-If it still fails, please send a screenshot of the error message and explain what happens during verification so a moderator can help review your case.`;
+Full guide:
+Tips to Pass Face Verification
+https://discourse.gooddollar.org/t/tips-to-pass-face-verification/8787
+
+If it still fails, please send a screenshot of the error message, your wallet address, and your phone model so a moderator can review it.`;
 
 const WALLET_CONNECTION_RESPONSE = `Hi! If your wallet is not connecting, please try these steps:
 
@@ -93,6 +106,10 @@ const MINIPAY_SWAP_RESPONSE = `Hi! If swapping failed in GoodDapp while using Mi
 • Check if the network is stable and not congested.
 • Make sure you are using the correct token and network.
 
+Optional alternative:
+You may also check the community initiative GoodMarket swapping tutorial:
+https://t.me/GoodDollarX/311491
+
 If the swap still fails, please send your wallet address, screenshot, transaction hash if available, swap pair, amount, and the exact error message so a moderator can review it.`;
 
 const GAS_RESPONSE = `Hi! Some actions may require gas to complete a blockchain transaction.
@@ -100,6 +117,18 @@ const GAS_RESPONSE = `Hi! Some actions may require gas to complete a blockchain 
 Please make sure your wallet has enough gas for the network you are using before trying again. If there is not enough gas, the transaction may fail or may not be submitted successfully.
 
 If you are unsure, please send a screenshot of the error message, your wallet address, and what action you were trying to do, such as claim, swap, or transfer.`;
+
+const IMPORT_WALLET_TOKEN_RESPONSE = `Hi! If you want to import your wallet or add the G$ token, please follow these guides:
+
+• Guide: Importing G$ token to a Web3 Wallet
+https://discourse.gooddollar.org/t/guide-importing-g-token-to-a-web3-wallet/8817
+
+• Guide: Exporting GoodWallet to EVM Web3 Wallets (MetaMask and TrustWallet)
+See Step 1 inside the guide above.
+
+Reminder: Keep your seed phrase/private key safe. Never share it with anyone.
+
+If your G$ balance still does not show, please check that you are using the correct network and the correct G$ token contract address.`;
 
 const REWARD_NOT_RECEIVED_RESPONSE = `Hi! If your G$ reward or balance is not showing, please try the following:
 
@@ -147,7 +176,7 @@ A moderator will review your case.`;
 export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   {
     category: "How to Claim G$",
-    intentExamples: ["how to claim g$", "where can i claim g$", "how can i get gooddollar", "how do i claim in goodwallet", "paano mag claim"],
+    intentExamples: ["how to claim", "where can i claim", "how can i get gooddollar", "how to claim g$", "how do i claim", "how to claim etc", "claim gooddollar", "claim g$", "paano mag claim", "paano mag-claim"],
     response: HOW_TO_CLAIM_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -155,7 +184,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "GoodWallet Claiming Failed",
-    intentExamples: ["claiming failed in goodwallet", "i can't claim in goodwallet", "goodwallet claim failed", "claim button not working", "my claim failed"],
+    intentExamples: ["goodwallet claim failed", "claiming failed", "claim button", "can't claim in goodwallet", "cant claim in goodwallet", "goodwallet claim not working", "claim failed in goodwallet", "my claim failed", "claim button not working"],
     response: CLAIMING_FAILED_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -163,7 +192,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Cannot Claim G$",
-    intentExamples: ["why i can't claim g$", "i cannot claim", "claim not working", "unable to claim", "g$ claim failed", "hindi ako makapag claim"],
+    intentExamples: ["cannot claim", "can't claim", "cant claim", "unable to claim", "claim not working", "hindi ako makapag", "di ako makapag", "g$ claim failed", "i cannot claim", "why i can't claim g$", "can't claim g$", "cant claim g$", "di ako makapag claim", "hindi ako makapag claim"],
     response: CANNOT_CLAIM_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -171,7 +200,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Face Verification Failed",
-    intentExamples: ["face verification failed", "i failed face verification", "verification not working", "selfie verification failed", "gooddollar verification failed", "my face scan failed"],
+    intentExamples: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission", "face verification failed", "selfie verification failed", "face scan failed", "camera access denied", "face not detected"],
     response: FACE_VERIFICATION_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -179,7 +208,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Wallet Connection Issue",
-    intentExamples: ["how to connect wallet", "wallet not connecting", "i can't connect my wallet", "how to connect goodwallet", "metamask not connecting", "minipay wallet not connecting"],
+    intentExamples: ["wallet not connecting", "connect wallet", "can't connect", "cant connect", "metamask not connecting", "trustwallet not connecting", "wallet connection", "wallet connect", "walletconnect", "i can't connect my wallet", "how to connect wallet", "how to connect goodwallet", "minipay wallet not connecting"],
     response: WALLET_CONNECTION_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -187,7 +216,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "MiniPay GoodDapp Swap Failed",
-    intentExamples: ["swap failed in gooddapp", "i can't swap using minipay", "minipay swap failed", "swapping failed", "gooddapp swap not working", "why my swap failed"],
+    intentExamples: ["minipay", "gooddapp", "swap", "swapping", "swap failed", "minipay swap failed", "swapping failed", "gooddapp swap not working", "swap failed in gooddapp", "i can't swap using minipay", "why my swap failed"],
     response: MINIPAY_SWAP_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -195,11 +224,19 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Gas Fee Issue",
-    intentExamples: ["what is gas", "not enough gas", "gas fee problem", "transaction failed because of gas", "do i need gas", "how much gas needed"],
+    intentExamples: ["not enough gas", "gas fee", "need gas", "what is gas", "how much gas", "gas problem", "gas fee problem", "transaction failed because of gas", "do i need gas", "how much gas needed"],
     response: GAS_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
     escalateIf: "user cannot identify required gas / transaction failed repeatedly"
+  },
+  {
+    category: "Importing Wallet / Importing G$ Token",
+    intentExamples: ["how to import wallet", "import wallet to metamask", "import wallet to trustwallet", "how to import g$ token", "add g$ token", "import goodwallet", "export goodwallet", "goodwallet to metamask", "goodwallet to trustwallet", "import goodwallet to metamask", "import goodwallet to trust wallet", "export goodwallet to metamask", "export goodwallet to trustwallet", "add gooddollar token", "import gooddollar token", "g$ token not showing", "gooddollar token not showing"],
+    response: IMPORT_WALLET_TOKEN_RESPONSE,
+    defaultDashboardStatus: "Auto-Replied",
+    alwaysEscalate: false,
+    escalateIf: "user still cannot import wallet/token or balance does not show"
   },
   {
     category: "Reward Not Received",
@@ -247,11 +284,12 @@ const KEYWORD_RULES: Array<{ category: AiSupportCategory; keywords: string[]; sc
   { category: "User Provided Evidence", keywords: ["screenshot", "screen shot", "see image", "photo", "this is the error", "error shown", "got this message"], score: 100 },
   { category: "Pending Case Follow-Up", keywords: ["update on my case", "follow up", "follow-up", "ticket", "pending case", "no update", "check my case"], score: 95 },
   { category: "MiniPay GoodDapp Swap Failed", keywords: ["minipay", "gooddapp", "swap", "swapping", "swap failed"], score: 90 },
-  { category: "Face Verification Failed", keywords: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission"], score: 85 },
-  { category: "GoodWallet Claiming Failed", keywords: ["goodwallet", "claim failed", "claiming failed", "claim button", "can't claim in goodwallet"], score: 82 },
+  { category: "Importing Wallet / Importing G$ Token", keywords: ["how to import wallet", "import wallet to metamask", "import wallet to trustwallet", "import wallet to trust wallet", "how to import g$ token", "add g$ token", "import goodwallet", "export goodwallet", "goodwallet to metamask", "goodwallet to trustwallet", "goodwallet to trust wallet", "add gooddollar token", "import gooddollar token", "g$ token not showing", "gooddollar token not showing"], score: 88 },
+  { category: "Face Verification Failed", keywords: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission", "camera access denied", "face not detected"], score: 85 },
+  { category: "GoodWallet Claiming Failed", keywords: ["goodwallet claim failed", "claiming failed", "claim button", "can't claim in goodwallet", "cant claim in goodwallet", "goodwallet claim not working", "claim failed in goodwallet", "my claim failed", "claim button not working"], score: 82 },
   { category: "Cannot Claim G$", keywords: ["cannot claim", "can't claim", "cant claim", "unable to claim", "claim not working", "hindi ako makapag", "di ako makapag", "g$ claim failed"], score: 80 },
-  { category: "How to Claim G$", keywords: ["how to claim", "where can i claim", "how can i get gooddollar", "paano mag claim", "paano mag-claim"], score: 78 },
-  { category: "Wallet Connection Issue", keywords: ["wallet not connecting", "connect wallet", "can't connect", "cant connect", "metamask not connecting", "wallet connection"], score: 76 },
+  { category: "How to Claim G$", keywords: ["how to claim", "where can i claim", "how can i get gooddollar", "how do i claim", "how to claim etc", "claim gooddollar", "claim g$", "paano mag claim", "paano mag-claim"], score: 78 },
+  { category: "Wallet Connection Issue", keywords: ["wallet not connecting", "connect wallet", "can't connect", "cant connect", "metamask not connecting", "trustwallet not connecting", "wallet connection", "wallet connect", "walletconnect"], score: 76 },
   { category: "Gas Fee Issue", keywords: ["not enough gas", "gas fee", "need gas", "what is gas", "how much gas", "gas problem"], score: 74 },
   { category: "Reward Not Received", keywords: ["didn't receive", "did not receive", "reward missing", "balance not showing", "claimed but no balance", "where is my g$", "not received"], score: 72 },
   { category: "Transaction Failed", keywords: ["transaction failed", "failed transaction", "transaction didn't go", "didn't go through", "transfer failed", "tx failed"], score: 70 }

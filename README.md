@@ -192,7 +192,7 @@ Set `SUPPORT_MODE=old` to keep the existing in-group support ticket creation flo
 
 The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the dashboard status for production tracking.
 
-In `ai` mode, non-registered group users receive one of the AI support responses for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. Auto-replied categories ask **✅ Yes, solved** or **❌ No, I still need help**; solved cases close as `Solved by Bot` metadata, while help/follow-up/evidence/unknown cases stay open for moderator review using the existing ticket accept button.
+In `ai` mode, non-registered group users receive one of the AI support responses for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, importing wallets/G$ tokens, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. Auto-replied categories ask **✅ Yes, solved** or **❌ No, I still need help**; solved cases close as `Solved by Bot` metadata, while help/follow-up/evidence/unknown cases stay open for moderator review. A registered support member can reply directly to handle the ticket, or use the existing ticket accept button as an optional fallback.
 
 ## In-group support ticket workflow
 

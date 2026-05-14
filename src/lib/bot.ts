@@ -536,7 +536,7 @@ function ticketFollowUpReplyMarkup(ticket: SupportTicket) {
 function ticketFollowUpText(ticket: SupportTicket): string {
   const code = ticketLabel(ticket);
   if (ticket.status === "open") {
-    return `Ticket #${code} is still open. A team member can accept this same ticket below.`;
+    return `Ticket #${code} is still open. A registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
   }
   if (ticket.status === "pending_user_resolution") {
     return `Ticket #${code} is still waiting for ${ticket.opened_by_name} to choose Solved or Not Solved. Please use the buttons below so a new ticket will not be opened for the same concern.`;
@@ -1199,7 +1199,7 @@ async function handleAiSupportTicketFollowUp(
   });
 
   await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
-  const text = `Thanks for the update. A moderator will review ticket #${ticketLabel(updatedTicket)}.\n\nPlease make sure you have sent your wallet address, screenshot if available, transaction hash if available, and the exact error message.`;
+  const text = `Thanks for the update. A moderator will review ticket #${ticketLabel(updatedTicket)}.\n\nPlease make sure you have sent your wallet address, screenshot if available, transaction hash if available, and the exact error message.\n\nA registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
     replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
@@ -1282,7 +1282,7 @@ async function handleAiSupportCallback(db: SupabaseRestClient, callback: Telegra
 
     await deleteCallbackMessage(chatId, callback);
     await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
-    const text = `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A moderator can accept this case below.`;
+    const text = `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
     const sent = await sendMessage(chatId, text, {
       replyToMessageId: ticket.opened_message_id,
       replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
