@@ -121,6 +121,18 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     return;
   }
 
+  const dmRegistration = await findRegistrationByUser(db, user.id);
+  if (!dmRegistration && getSupportMode() === "ai") {
+    const activeDmTicket = await findActiveSupportTicketForUser(db, message.chat.id, user.id);
+    if (activeDmTicket && isAiSupportTicket(activeDmTicket)) {
+      await handleAiSupportTicketFollowUp(db, activeDmTicket, message, user);
+      return;
+    }
+
+    await handleAiSupportMessage(db, message, user);
+    return;
+  }
+
   await sendMessage(message.chat.id, "Please use the buttons below.", { replyMarkup: dashboardKeyboard() });
 }
 
@@ -1119,12 +1131,15 @@ async function handleAiSupportMessage(
     metadata: { ...aiSupportMetadata(match), originalQuestion: originalText, attachments }
   });
 
+  const inDmChat = !isGroupChat(message.chat);
   const replyText = match.alwaysEscalate
-    ? buildAiSupportModeratorText(ticket, match)
+    ? `${buildAiSupportModeratorText(ticket, match)}${inDmChat ? "\n\nA moderator will follow up with you here as soon as possible." : ""}`
     : buildAiSupportAutoReplyText(ticket, match);
   const sent = await sendMessage(message.chat.id, replyText, {
     replyToMessageId: message.message_id,
-    replyMarkup: match.alwaysEscalate ? ticketAcceptKeyboard(ticket.id) : aiSupportResolutionKeyboard(ticket.id)
+    replyMarkup: match.alwaysEscalate
+      ? (inDmChat ? undefined : ticketAcceptKeyboard(ticket.id))
+      : aiSupportResolutionKeyboard(ticket.id)
   });
   await recordBotTicketMessage(db, ticket, sent.message_id, message.message_id, replyText, message.chat.id);
 }
@@ -1202,10 +1217,11 @@ async function handleAiSupportTicketFollowUp(
   });
 
   await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
-  const text = buildAiSupportModeratorText(updatedTicket, match);
+  const inDmChatFollowUp = !isGroupChat(message.chat);
+  const text = `${buildAiSupportModeratorText(updatedTicket, match)}${inDmChatFollowUp ? "\n\nA moderator will follow up with you here as soon as possible." : ""}`;
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
-    replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
+    replyMarkup: inDmChatFollowUp ? undefined : ticketAcceptKeyboard(updatedTicket.id)
   });
   await recordBotTicketMessage(db, updatedTicket, sent.message_id, message.message_id, text, message.chat.id);
 }
@@ -1285,10 +1301,13 @@ async function handleAiSupportCallback(db: SupabaseRestClient, callback: Telegra
 
     await deleteCallbackMessage(chatId, callback);
     await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
-    const text = `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A moderator can accept this case below.`;
+    const inDmCallbackChat = callback.message ? !isGroupChat(callback.message.chat) : false;
+    const text = inDmCallbackChat
+      ? `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A moderator will follow up with you here as soon as possible.`
+      : `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A moderator can accept this case below.`;
     const sent = await sendMessage(chatId, text, {
       replyToMessageId: ticket.opened_message_id,
-      replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
+      replyMarkup: inDmCallbackChat ? undefined : ticketAcceptKeyboard(updatedTicket.id)
     });
     await recordBotTicketMessage(db, updatedTicket, sent.message_id, ticket.opened_message_id, text, chatId);
     return;
@@ -1612,14 +1631,14 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
     return;
   }
 
+  if (isAiSupportCallback) {
+    await handleAiSupportCallback(db, callback);
+    return;
+  }
+
   if (message && isGroupChat(message.chat)) {
     if (isTicketCallback) {
       await handleTicketCallback(db, callback);
-      return;
-    }
-
-    if (isAiSupportCallback) {
-      await handleAiSupportCallback(db, callback);
       return;
     }
 
