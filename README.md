@@ -137,12 +137,14 @@ Both endpoints accept either `Authorization: Bearer $CRON_SECRET` or `?secret=$C
 
 To get `TEAM_GROUP_CHAT_ID`:
 
-1. Deploy the latest bot code first, then add the bot to your Telegram group.
-2. If you need to request it manually, send `/chatid@YourBotUsername` in the group. The aliases `/id@YourBotUsername`, `/groupid@YourBotUsername`, and `/start@YourBotUsername` also reply with the same chat ID.
+1. Deploy the latest bot code first, then add the bot to your Telegram group. When Telegram sends the bot-added event, the bot replies in that group with its chat ID automatically.
+2. If you need to request it manually, send `/chatid@YourBotUsername` in the group. The aliases `/id@YourBotUsername`, `/groupid@YourBotUsername`, and `/start@YourBotUsername` also reply with the same chat ID. In groups, include `@YourBotUsername` so Telegram delivers the command to the correct bot.
 3. If the bot was already in the group before this code was deployed, send `/chatid@YourBotUsername`.
 4. Copy the `Chat ID` value from the bot reply. Group IDs are usually negative, for example `-1001234567890`.
-5. Add the primary notification group value as `TEAM_GROUP_CHAT_ID` in your Vercel environment variables and redeploy.
-6. If you want stats for multiple groups, add every stats group ID to `TEAM_STATS_GROUP_CHAT_IDS`, separated by commas or spaces. Example: `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`.
+5. Add the primary notification group value as `TEAM_GROUP_CHAT_ID` in your Vercel environment variables and redeploy. Only this one group receives reminders and attendance broadcasts.
+6. If you want stats for multiple groups, add every stats group ID to `TEAM_STATS_GROUP_CHAT_IDS`, separated by commas or spaces. Example: `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`. This variable only controls dashboard message-stat tracking; it does not make the bot broadcast reminders to those groups.
+
+If `/chatid@YourBotUsername` gets no reply in a stats-only group, check that the same bot token is deployed, the webhook is pointed at the latest deployment, the bot has permission to send messages in that group, and the deployment was redeployed after environment-variable changes. `TEAM_STATS_GROUP_CHAT_IDS` does not grant Telegram access by itself; the bot must be an actual member of each group and Telegram must deliver the command update to the webhook.
 
 After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 10 minutes before a member's shift starts, when the shift starts, when a member is late, 1 hour before a member's shift ends for proof-of-work submission, 10 minutes before a member's shift ends for Time Out, when the shift ends, and when a member is missing Time Out. The Time In button also posts a group warning when an early Time In attempt is blocked.
 
