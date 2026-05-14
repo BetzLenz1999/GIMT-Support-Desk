@@ -10,3 +10,14 @@ export function requireEnv(name: string): string {
 export function optionalEnv(name: string): string | undefined {
   return process.env[name] || undefined;
 }
+
+
+export type SupportMode = "old" | "ai";
+
+export function getSupportMode(): SupportMode {
+  const rawValue = (process.env.SUPPORT_MODE || "old").trim().toLowerCase();
+  if (rawValue === "ai" || rawValue === "old") return rawValue;
+
+  console.warn(`Invalid SUPPORT_MODE=${process.env.SUPPORT_MODE}. Falling back to old support flow.`);
+  return "old";
+}
