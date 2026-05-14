@@ -35,7 +35,7 @@ TEAM_GROUP_CHAT_ID=
 # Optional public stats allowlist for multiple Telegram groups (comma- or space-separated)
 TEAM_STATS_GROUP_CHAT_IDS=
 # Optional support flow switch: old or ai
-SUPPORT_MODE=old
+SUPPORT_MODE=ai
 ```
 
 `SUPABASE_ANON_KEY` is supported only as a fallback, but `SUPABASE_SERVICE_ROLE_KEY` is recommended because the bot runs server-side and performs trusted writes.
@@ -174,7 +174,7 @@ If `CRON_SECRET` is not set in Vercel, the endpoint is open; otherwise pass it a
 
 ## Support mode switch
 
-Set `SUPPORT_MODE=old` to keep the existing in-group support ticket creation flow. Set `SUPPORT_MODE=ai` to pause that old opening flow and use the AI support flow instead. Switching the env var back to `old` restores the old behavior without changing the Supabase schema.
+AI support is the default flow. Set `SUPPORT_MODE=ai` (or leave it unset) to use the auto-response AI support flow. Set `SUPPORT_MODE=old` only when you need to temporarily restore the previous in-group support ticket creation flow. Switching the env var between `ai` and `old` does not change the Supabase schema.
 
 The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the dashboard status for tracking and follow-up.
 
