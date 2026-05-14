@@ -111,6 +111,19 @@ export type GroupMessageStatWithGroup = GroupMessageStat & {
   group_type: string | null;
 };
 
+export type SavedCommand = {
+  id: string;
+  owner_telegram_user_id: number;
+  owner_member_id: string;
+  owner_member_name: string;
+  command_name: string;
+  source_chat_id: number;
+  source_message_id: number;
+  source_message_text: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AppSetting = {
   key: string;
   value: string;

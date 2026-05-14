@@ -1,4 +1,4 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -52,6 +52,48 @@ export async function findRegistrationByMemberId(db: SupabaseRestClient, memberI
 
 export async function listRegistrations(db: SupabaseRestClient): Promise<Registration[]> {
   return db.select<Registration>("team_registrations");
+}
+
+export async function upsertSavedCommand(
+  db: SupabaseRestClient,
+  input: {
+    owner_telegram_user_id: number;
+    owner_member_id: string;
+    owner_member_name: string;
+    command_name: string;
+    source_chat_id: number;
+    source_message_id: number;
+    source_message_text?: string | null;
+  }
+): Promise<SavedCommand> {
+  const rows = await db.upsert<SavedCommand>(
+    "saved_commands",
+    {
+      owner_telegram_user_id: input.owner_telegram_user_id,
+      owner_member_id: input.owner_member_id,
+      owner_member_name: input.owner_member_name,
+      command_name: input.command_name,
+      source_chat_id: input.source_chat_id,
+      source_message_id: input.source_message_id,
+      source_message_text: input.source_message_text ?? null,
+      updated_at: new Date().toISOString()
+    },
+    "owner_telegram_user_id,command_name"
+  );
+
+  return single(rows);
+}
+
+export async function findSavedCommandForUser(
+  db: SupabaseRestClient,
+  ownerTelegramUserId: number,
+  commandName: string
+): Promise<SavedCommand | null> {
+  const rows = await db.select<SavedCommand>(
+    "saved_commands",
+    params(eq("owner_telegram_user_id", ownerTelegramUserId), eq("command_name", commandName), limit(1))
+  );
+  return rows[0] ?? null;
 }
 
 export async function getAppSetting(db: SupabaseRestClient, key: string): Promise<string | null> {

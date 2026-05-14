@@ -183,6 +183,23 @@ create table if not exists public.group_message_stats (
 create index if not exists group_message_stats_member_date_idx on public.group_message_stats(member_id, work_date_utc desc);
 create index if not exists group_message_stats_date_idx on public.group_message_stats(work_date_utc desc);
 
+create table if not exists public.saved_commands (
+  id uuid primary key default gen_random_uuid(),
+  owner_telegram_user_id bigint not null,
+  owner_member_id text not null,
+  owner_member_name text not null,
+  command_name text not null check (command_name ~ '^[a-z][a-z0-9_]{0,31}$'),
+  source_chat_id bigint not null,
+  source_message_id bigint not null,
+  source_message_text text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(owner_telegram_user_id, command_name)
+);
+
+create index if not exists saved_commands_owner_idx
+  on public.saved_commands(owner_telegram_user_id, command_name);
+
 create or replace function public.increment_group_message_count(
   p_member_id text,
   p_member_name text,
