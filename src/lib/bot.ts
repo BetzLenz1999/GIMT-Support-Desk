@@ -560,6 +560,14 @@ async function handleTicketResolutionCommand(
     return;
   }
 
+  if (ticket.accepted_by_telegram_user_id && ticket.accepted_by_telegram_user_id !== registration.telegram_user_id) {
+    const assignedName = ticket.assigned_member_name ?? "the assigned team member";
+    await sendMessage(message.chat.id, `Only ${assignedName} can ask for this ticket's resolution status.`, {
+      replyToMessageId: message.message_id
+    });
+    return;
+  }
+
   const actorTelegramUserId = ticket.accepted_by_telegram_user_id ?? registration.telegram_user_id;
   const actorName = ticket.assigned_member_name ?? registration.member_name;
   const triggeredByAssignedMember = ticket.accepted_by_telegram_user_id === registration.telegram_user_id;
@@ -613,14 +621,6 @@ async function recordTeamTicketReplyIfReferenced(
     const member = getTeamMember(registration.member_id);
     if (!member) return;
 
-    const responderIsTimedIn = await isRegistrationTimedIn(db, registration, member);
-    if (ticket.assigned_member_id && ticket.assigned_member_id !== registration.member_id && !responderIsTimedIn) {
-      const text = buildTicketAlreadyAssignedText(ticket, registration);
-      const sent = await sendMessage(message.chat.id, text, { replyToMessageId: message.message_id });
-      await recordBotTicketMessage(db, ticket, sent.message_id, message.message_id, text, message.chat.id);
-      return;
-    }
-
     await connectTicketToTeamMember(db, ticket, registration, {
       chatId: message.chat.id,
       telegramMessageId: message.message_id,
@@ -628,11 +628,6 @@ async function recordTeamTicketReplyIfReferenced(
       eventType: ticket.status === "open" ? "ticket_accepted" : "ticket_handler_reassigned"
     });
   }
-}
-
-function buildTicketAlreadyAssignedText(ticket: SupportTicket, registration: Registration): string {
-  const assignedName = ticket.assigned_member_name ?? "another team member";
-  return `Ticket #${ticketLabel(ticket)} is already assigned to ${assignedName}. ${registration.member_name}, please time in first before taking over this ticket.`;
 }
 
 function getTicketScheduledMember(ticket: SupportTicket): Pick<TeamMember, "id" | "name"> | null {
