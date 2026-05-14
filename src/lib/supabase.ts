@@ -1,4 +1,5 @@
 import { requireEnv } from "./config.js";
+import { fetchWithRetry } from "./http.js";
 
 export type Registration = {
   id: string;
@@ -293,7 +294,7 @@ export function getSupabase(): SupabaseRestClient {
   const key = getSupabaseKey();
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${baseUrl}/rest/v1/${path}`, {
+    const response = await fetchWithRetry(`${baseUrl}/rest/v1/${path}`, {
       ...init,
       headers: {
         apikey: key,
@@ -302,7 +303,7 @@ export function getSupabase(): SupabaseRestClient {
         prefer: "return=representation",
         ...(init.headers ?? {})
       }
-    });
+    }, { timeoutMs: 10000 });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -314,14 +315,14 @@ export function getSupabase(): SupabaseRestClient {
   }
 
   async function storageRequest(path: string, init: RequestInit = {}): Promise<void> {
-    const response = await fetch(`${baseUrl}/storage/v1/${path}`, {
+    const response = await fetchWithRetry(`${baseUrl}/storage/v1/${path}`, {
       ...init,
       headers: {
         apikey: key,
         authorization: `Bearer ${key}`,
         ...(init.headers ?? {})
       }
-    });
+    }, { timeoutMs: 20000 });
 
     if (!response.ok) {
       const errorText = await response.text();

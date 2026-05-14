@@ -45,18 +45,45 @@ import { detectAiSupportTemplate, type AiSupportDashboardStatus, type AiSupportM
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
 export async function handleTelegramUpdate(db: SupabaseRestClient, update: TelegramUpdate): Promise<void> {
-  if (update.callback_query) {
-    await handleCallback(db, update.callback_query);
-    return;
-  }
+  try {
+    if (update.callback_query) {
+      await handleCallback(db, update.callback_query);
+      return;
+    }
 
-  if (update.my_chat_member) {
-    await handleBotChatMemberUpdate(db, update.my_chat_member);
+    if (update.my_chat_member) {
+      await handleBotChatMemberUpdate(db, update.my_chat_member);
+      return;
+    }
+
+    if (update.message) {
+      await handleMessage(db, update.message);
+    }
+  } catch (error) {
+    await handleTelegramUpdateError(update, error);
+  }
+}
+
+async function handleTelegramUpdateError(update: TelegramUpdate, error: unknown): Promise<void> {
+  console.error(`Telegram update ${update.update_id} failed:`, error);
+
+  const fallbackText = "Sorry, I couldn't process that request. Please try again or send /menu to refresh the bot.";
+
+  if (update.callback_query) {
+    try {
+      await answerCallbackQuery(update.callback_query.id, fallbackText, { showAlert: true });
+    } catch (sendError) {
+      console.error(`Failed to answer fallback callback for update ${update.update_id}:`, sendError);
+    }
     return;
   }
 
   if (update.message) {
-    await handleMessage(db, update.message);
+    try {
+      await sendMessage(update.message.chat.id, fallbackText, { replyToMessageId: update.message.message_id });
+    } catch (sendError) {
+      console.error(`Failed to send fallback error message for update ${update.update_id}:`, sendError);
+    }
   }
 }
 
