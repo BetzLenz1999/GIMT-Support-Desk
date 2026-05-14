@@ -241,15 +241,6 @@ create table if not exists public.app_settings (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.telegram_update_receipts (
-  update_id bigint primary key,
-  update_type text not null,
-  received_at timestamptz not null default now()
-);
-
-create index if not exists telegram_update_receipts_received_at_idx
-  on public.telegram_update_receipts(received_at);
-
 create table if not exists public.support_tickets (
   id uuid primary key default gen_random_uuid(),
   ticket_code text unique,
