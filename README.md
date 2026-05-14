@@ -68,6 +68,20 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET"}'
 ```
 
+If Telegram says `Webhook is already set` but the bot still does not reply, first open the deployed webhook endpoint in a browser:
+
+```text
+https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook
+```
+
+It should return JSON showing that the endpoint is deployed and which required environment variables are present. For detailed Telegram diagnostics, pass either `TELEGRAM_WEBHOOK_SECRET` or `CRON_SECRET` as `?secret=`:
+
+```text
+https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook?secret=YOUR_TELEGRAM_WEBHOOK_SECRET
+```
+
+Check the returned `telegram.webhook.last_error_message` and `telegram.webhook.pending_update_count`. A common cause of a silent bot is a secret mismatch: if `TELEGRAM_WEBHOOK_SECRET` is configured in the deployment, the `setWebhook` call must include the exact same value as `secret_token`; otherwise this app will reject Telegram's POST requests with `401 Unauthorized`.
+
 
 ### Netlify dashboard API routes
 
