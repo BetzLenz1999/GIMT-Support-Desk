@@ -1,5 +1,6 @@
 import { optionalEnv } from "../../src/lib/config.js";
 import { handleTelegramUpdate } from "../../src/lib/bot.js";
+import { claimTelegramUpdate } from "../../src/lib/repository.js";
 import { getSupabase } from "../../src/lib/supabase.js";
 import { getMe, getWebhookInfo } from "../../src/lib/telegram.js";
 import type { TelegramUpdate } from "../../src/lib/telegram-types.js";
@@ -53,6 +54,13 @@ function getHeader(request: any, name: string): string | undefined {
 
 function getRequestUrl(request: any): URL {
   return new URL(request.url || "/", "https://localhost");
+}
+
+function getTelegramUpdateType(update: TelegramUpdate): string {
+  if (update.callback_query) return "callback_query";
+  if (update.my_chat_member) return "my_chat_member";
+  if (update.message) return "message";
+  return "unknown";
 }
 
 function hasValidWebhookSecret(request: any): boolean {
@@ -153,7 +161,16 @@ export default async function handler(request: any, response: any) {
 
   try {
     const update = await readJsonBody<TelegramUpdate>(request);
-    await handleTelegramUpdate(getSupabase(), update);
+    const db = getSupabase();
+    const claimed = await claimTelegramUpdate(db, update.update_id, getTelegramUpdateType(update));
+
+    if (!claimed) {
+      console.warn(`Skipped duplicate Telegram update ${update.update_id}.`);
+      sendJson(response, 200, { ok: true, duplicate: true });
+      return;
+    }
+
+    await handleTelegramUpdate(db, update);
     sendJson(response, 200, { ok: true });
   } catch (error) {
     console.error(error);
