@@ -1,4 +1,5 @@
 import { requireEnv } from "./config.js";
+import { fetchWithRetry } from "./http.js";
 import type { InlineKeyboardMarkup } from "./telegram-types.js";
 
 export type SendMessageOptions = {
@@ -27,7 +28,7 @@ export class TelegramApiError extends Error {
 
 async function telegramApi<T>(method: string, payload: Record<string, unknown>): Promise<T> {
   const token = requireEnv("TELEGRAM_BOT_TOKEN");
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const response = await fetchWithRetry(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
@@ -56,7 +57,7 @@ export async function getFile(fileId: string): Promise<TelegramFile> {
 
 export async function downloadFile(filePath: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
   const token = requireEnv("TELEGRAM_BOT_TOKEN");
-  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  const response = await fetchWithRetry(`https://api.telegram.org/file/bot${token}/${filePath}`, {}, { timeoutMs: 15000 });
   if (!response.ok) {
     const errorText = await response.text();
     throw new TelegramApiError("downloadFile", `${response.status} ${response.statusText}: ${errorText}`);
