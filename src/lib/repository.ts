@@ -1,10 +1,64 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TelegramUpdateReceipt, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
 function single<T>(rows: T[]): T {
   if (!rows[0]) throw new Error("Expected one row, received none");
   return rows[0];
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("duplicate") || message.includes("23505");
+}
+
+function isMissingTelegramUpdateReceiptTableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("42P01") || message.includes("telegram_update_receipts") && message.toLowerCase().includes("does not exist");
+}
+
+async function claimTelegramUpdateWithAppSettingFallback(
+  db: SupabaseRestClient,
+  updateId: number,
+  updateType: string
+): Promise<boolean> {
+  try {
+    await db.insert<AppSetting>("app_settings", {
+      key: `telegram_update:${updateId}`,
+      value: updateType,
+      updated_at: new Date().toISOString()
+    });
+    return true;
+  } catch (error) {
+    if (isDuplicateKeyError(error)) return false;
+    throw error;
+  }
+}
+
+export async function claimTelegramUpdate(
+  db: SupabaseRestClient,
+  updateId: number,
+  updateType: string
+): Promise<boolean> {
+  try {
+    await db.insert<TelegramUpdateReceipt>("telegram_update_receipts", {
+      update_id: updateId,
+      update_type: updateType,
+      received_at: new Date().toISOString()
+    });
+    return true;
+  } catch (error) {
+    if (isDuplicateKeyError(error)) return false;
+
+    if (isMissingTelegramUpdateReceiptTableError(error)) {
+      console.warn(
+        "telegram_update_receipts table is missing; falling back to app_settings for Telegram update de-duplication. Re-run supabase/schema.sql to create the dedicated table."
+      );
+      return claimTelegramUpdateWithAppSettingFallback(db, updateId, updateType);
+    }
+
+    throw error;
+  }
 }
 
 const ACTIVE_SUPPORT_TICKET_STATUSES: SupportTicketStatus[] = [

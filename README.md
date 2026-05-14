@@ -54,7 +54,7 @@ If `TEAM_GROUP_CHAT_ID` is not set or its value is wrong, the bot also keeps a s
 
 Run the SQL in [`supabase/schema.sql`](supabase/schema.sql) in your Supabase SQL editor before deploying. The script is idempotent (`create table if not exists`), so it is safe to re-run when new tables or indexes are added.
 
-When upgrading an existing deployment, re-running `supabase/schema.sql` will add the `public.group_action_messages` table that tracks team-group prompt and ack message IDs so old prompts can be cleaned up automatically. It will also add `public.telegram_groups`, which stores each tracked Telegram group's actual title so the web dashboard can show names such as GIMT, GoodDollar, or Support instead of only numeric chat IDs.
+When upgrading an existing deployment, re-running `supabase/schema.sql` will add the `public.group_action_messages` table that tracks team-group prompt and ack message IDs so old prompts can be cleaned up automatically. It will also add `public.telegram_groups`, which stores each tracked Telegram group's actual title so the web dashboard can show names such as GIMT, GoodDollar, or Support instead of only numeric chat IDs. The schema also includes `public.telegram_update_receipts`, which lets the webhook skip Telegram retries that would otherwise create duplicate group replies.
 
 Re-run `supabase/schema.sql` after deploying the support-ticket workflow as well. It adds `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events`; these tables are separate from `activity_logs`, `time_logs`, `proof_of_work_submissions`, and `group_message_stats`.
 
