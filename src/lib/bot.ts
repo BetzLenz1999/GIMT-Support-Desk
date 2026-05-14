@@ -1027,6 +1027,7 @@ An available team member can handle this ticket.`;
 
 
 const AI_SUPPORT_TICKET_PREFIX = "[AI Support]";
+const AI_SUPPORT_REVIEW_NOTE = "\n\nNote: These are draft templates. Please review with Lewis/core team to confirm this matches the official process.";
 
 function isAiSupportTicket(ticket: SupportTicket): boolean {
   return ticket.opened_message_text.startsWith(AI_SUPPORT_TICKET_PREFIX);
@@ -1037,11 +1038,11 @@ function aiSupportConcernText(originalText: string, match: AiSupportMatch): stri
 }
 
 function buildAiSupportAutoReplyText(ticket: SupportTicket, match: AiSupportMatch): string {
-  return `${match.response}\n\nDashboard category: ${match.category}\nStatus: ${match.defaultDashboardStatus}\nTicket #${ticketLabel(ticket)}\n\nDid this answer solve your issue?`;
+  return `${match.response}${AI_SUPPORT_REVIEW_NOTE}\n\nDashboard category: ${match.category}\nStatus: ${match.defaultDashboardStatus}\nTicket #${ticketLabel(ticket)}\n\nDid this answer solve your issue?`;
 }
 
 function buildAiSupportModeratorText(ticket: SupportTicket, match: AiSupportMatch): string {
-  return `${match.response}\n\nDashboard category: ${match.category}\nStatus: ${match.defaultDashboardStatus}\nTicket #${ticketLabel(ticket)}`;
+  return `${match.response}${AI_SUPPORT_REVIEW_NOTE}\n\nDashboard category: ${match.category}\nStatus: ${match.defaultDashboardStatus}\nTicket #${ticketLabel(ticket)}`;
 }
 
 function aiSupportMetadata(match: AiSupportMatch, dashboardStatus?: AiSupportDashboardStatus): Record<string, unknown> {
@@ -1052,7 +1053,8 @@ function aiSupportMetadata(match: AiSupportMatch, dashboardStatus?: AiSupportDas
     dashboardStatus: dashboardStatus ?? match.defaultDashboardStatus,
     alwaysEscalate: match.alwaysEscalate,
     escalateIf: match.escalateIf,
-    matchedKeywords: match.matchedKeywords
+    matchedKeywords: match.matchedKeywords,
+    draftTemplateNeedsCoreTeamReview: true
   };
 }
 

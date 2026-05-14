@@ -174,11 +174,13 @@ If `CRON_SECRET` is not set in Vercel, the endpoint is open; otherwise pass it a
 
 ## Support mode switch
 
-Set `SUPPORT_MODE=old` to keep the existing in-group support ticket creation flow. Set `SUPPORT_MODE=ai` to pause that old opening flow and use the AI support flow instead. Switching the env var back to `old` restores the old behavior without changing the Supabase schema.
+Set `SUPPORT_MODE=old` to keep the existing in-group support ticket creation flow. Set `SUPPORT_MODE=ai` to pause that old opening flow and use the new draft AI support flow instead. Switching the env var back to `old` restores the old behavior without changing the Supabase schema.
 
-The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the dashboard status for tracking and follow-up.
+The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the draft dashboard status so they can be reviewed before the official process is finalized.
 
-In `ai` mode, non-registered group users receive support replies for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, GoodWallet export to MetaMask/TrustWallet, MiniPay/GoodDapp/GoodReserve swap issues, gas fee issues, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. Relevant replies include official GoodDollar guide links when available. Auto-replied categories ask **✅ Yes, solved** or **❌ No, I still need help**; solved cases close as `Solved by Bot` metadata, while help/follow-up/evidence/unknown cases stay open for moderator review using the existing ticket accept button.
+In `ai` mode, non-registered group users receive one of the draft templates for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. Auto-replied categories ask **✅ Yes, solved** or **❌ No, I still need help**; solved cases close as `Solved by Bot` metadata, while help/follow-up/evidence/unknown cases stay open for moderator review using the existing ticket accept button.
+
+> Important: The AI responses are still draft templates and should be reviewed with Lewis/core team before being treated as the final official support process.
 
 ## In-group support ticket workflow
 

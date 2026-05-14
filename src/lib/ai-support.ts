@@ -12,7 +12,6 @@ export type AiSupportCategory =
   | "Cannot Claim G$"
   | "Face Verification Failed"
   | "Wallet Connection Issue"
-  | "Export GoodWallet to EVM Wallet"
   | "MiniPay GoodDapp Swap Failed"
   | "Gas Fee Issue"
   | "Reward Not Received"
@@ -40,14 +39,7 @@ Then go to the claim section and follow the steps shown in the app.
 
 Please also make sure you have enough gas if the action requires a blockchain transaction.
 
-If you still cannot claim, please send a screenshot, your wallet address, and the exact error message so a moderator can check your case.
-
-Helpful guides:
-• Guide: Claiming G$ on GoodDapp using GoodWallet
-https://discourse.gooddollar.org/t/guide-claiming-g-on-gooddapp-using-goodwallet/8792
-
-• Guide: How to Claim G$ on GoodWallet
-https://discourse.gooddollar.org/t/guide-how-to-claim-g-on-goodwallet/8788`;
+If you still cannot claim, please send a screenshot, your wallet address, and the exact error message so a moderator can check your case.`;
 
 const CLAIMING_FAILED_RESPONSE = `Hi! If claiming failed in GoodWallet, please check the following first:
 
@@ -57,14 +49,7 @@ const CLAIMING_FAILED_RESPONSE = `Hi! If claiming failed in GoodWallet, please c
 • Refresh the app and try again.
 • Make sure you have enough gas if the claim requires a blockchain transaction.
 
-If the issue continues, please send your wallet address, screenshot, and the exact error message so a moderator can review it.
-
-Helpful guides:
-• Guide: Claiming G$ on GoodDapp using GoodWallet
-https://discourse.gooddollar.org/t/guide-claiming-g-on-gooddapp-using-goodwallet/8792
-
-• Guide: How to Claim G$ on GoodWallet
-https://discourse.gooddollar.org/t/guide-how-to-claim-g-on-goodwallet/8788`;
+If the issue continues, please send your wallet address, screenshot, and the exact error message so a moderator can review it.`;
 
 const CANNOT_CLAIM_RESPONSE = `Hi! If you can’t claim G$, please check these common reasons:
 
@@ -75,14 +60,7 @@ const CANNOT_CLAIM_RESPONSE = `Hi! If you can’t claim G$, please check these c
 • The app may need to be refreshed or reopened.
 • You may need enough gas if the action requires a blockchain transaction.
 
-If you already checked these and still can’t claim, please send your wallet address, screenshot, and exact error message for moderator review.
-
-Helpful guides:
-• Guide: Claiming G$ on GoodDapp using GoodWallet
-https://discourse.gooddollar.org/t/guide-claiming-g-on-gooddapp-using-goodwallet/8792
-
-• Guide: How to Claim G$ on GoodWallet
-https://discourse.gooddollar.org/t/guide-how-to-claim-g-on-goodwallet/8788`;
+If you already checked these and still can’t claim, please send your wallet address, screenshot, and exact error message for moderator review.`;
 
 const FACE_VERIFICATION_RESPONSE = `Hi! If your face verification failed, please try the following:
 
@@ -93,11 +71,7 @@ const FACE_VERIFICATION_RESPONSE = `Hi! If your face verification failed, please
 • Use a stable internet connection.
 • Try refreshing or restarting the app before trying again.
 
-If it still fails, please send a screenshot of the error message and explain what happens during verification so a moderator can help review your case.
-
-Helpful guide:
-• Tips to Pass Face Verification
-https://discourse.gooddollar.org/t/tips-to-pass-face-verification/8787`;
+If it still fails, please send a screenshot of the error message and explain what happens during verification so a moderator can help review your case.`;
 
 const WALLET_CONNECTION_RESPONSE = `Hi! If your wallet is not connecting, please try these steps:
 
@@ -110,13 +84,6 @@ const WALLET_CONNECTION_RESPONSE = `Hi! If your wallet is not connecting, please
 
 If it still doesn’t work, please send your wallet address, wallet type, screenshot, and the error message you see.`;
 
-const EXPORT_GOODWALLET_RESPONSE = `Hi! If you want to export your GoodWallet to an EVM/Web3 wallet such as MetaMask or TrustWallet, please follow the official guide below.
-
-Guide: Exporting GoodWallet to EVM/Web3 Wallets (MetaMask and TrustWallet)
-https://discourse.gooddollar.org/t/guide-exporting-goodwallet-to-evm-web3-wallets-metamask-and-trustwallet/7936
-
-Please be careful with wallet export/import steps. Never share your private key, recovery phrase, seed phrase, or secret wallet information with anyone, including moderators or support.`;
-
 const MINIPAY_SWAP_RESPONSE = `Hi! If swapping failed in GoodDapp while using MiniPay, please check the following:
 
 • Make sure your MiniPay wallet is properly connected.
@@ -126,17 +93,7 @@ const MINIPAY_SWAP_RESPONSE = `Hi! If swapping failed in GoodDapp while using Mi
 • Check if the network is stable and not congested.
 • Make sure you are using the correct token and network.
 
-If the swap still fails, please send your wallet address, screenshot, transaction hash if available, swap pair, amount, and the exact error message so a moderator can review it.
-
-Helpful swap guides:
-• Guide: How to Swap G$ (XDC) from GoodReserve
-https://discourse.gooddollar.org/t/guide-how-to-swap-g-xdc-from-goodreserve/8863
-
-• Guide: Swapping G$ Celo Using GoodDapp From GoodReserve
-https://discourse.gooddollar.org/t/guide-swapping-g-celo-using-gooddapp-from-goodreserve/8816
-
-• Guide: Swapping G$ on Mini Pay
-https://discourse.gooddollar.org/t/guide-swapping-g-on-mini-pay/8794`;
+If the swap still fails, please send your wallet address, screenshot, transaction hash if available, swap pair, amount, and the exact error message so a moderator can review it.`;
 
 const GAS_RESPONSE = `Hi! Some actions may require gas to complete a blockchain transaction.
 
@@ -229,14 +186,6 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
     escalateIf: "user still cannot connect"
   },
   {
-    category: "Export GoodWallet to EVM Wallet",
-    intentExamples: ["export goodwallet to metamask", "export goodwallet to trustwallet", "how to import goodwallet", "goodwallet evm wallet", "move goodwallet to web3 wallet"],
-    response: EXPORT_GOODWALLET_RESPONSE,
-    defaultDashboardStatus: "Auto-Replied",
-    alwaysEscalate: false,
-    escalateIf: "user cannot export/import wallet or sees an error"
-  },
-  {
     category: "MiniPay GoodDapp Swap Failed",
     intentExamples: ["swap failed in gooddapp", "i can't swap using minipay", "minipay swap failed", "swapping failed", "gooddapp swap not working", "why my swap failed"],
     response: MINIPAY_SWAP_RESPONSE,
@@ -297,8 +246,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
 const KEYWORD_RULES: Array<{ category: AiSupportCategory; keywords: string[]; score: number }> = [
   { category: "User Provided Evidence", keywords: ["screenshot", "screen shot", "see image", "photo", "this is the error", "error shown", "got this message"], score: 100 },
   { category: "Pending Case Follow-Up", keywords: ["update on my case", "follow up", "follow-up", "ticket", "pending case", "no update", "check my case"], score: 95 },
-  { category: "Export GoodWallet to EVM Wallet", keywords: ["export goodwallet", "export wallet", "import goodwallet", "goodwallet to metamask", "goodwallet to trustwallet", "goodwallet to trust wallet", "export to metamask", "export to trustwallet", "export to trust wallet", "evm wallet", "web3 wallet", "private key", "recovery phrase", "seed phrase"], score: 92 },
-  { category: "MiniPay GoodDapp Swap Failed", keywords: ["minipay", "gooddapp", "goodreserve", "swap", "swapping", "swap failed", "swap g$", "g$ xdc", "g$ celo", "xdc", "celo"], score: 90 },
+  { category: "MiniPay GoodDapp Swap Failed", keywords: ["minipay", "gooddapp", "swap", "swapping", "swap failed"], score: 90 },
   { category: "Face Verification Failed", keywords: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission"], score: 85 },
   { category: "GoodWallet Claiming Failed", keywords: ["goodwallet", "claim failed", "claiming failed", "claim button", "can't claim in goodwallet"], score: 82 },
   { category: "Cannot Claim G$", keywords: ["cannot claim", "can't claim", "cant claim", "unable to claim", "claim not working", "hindi ako makapag", "di ako makapag", "g$ claim failed"], score: 80 },
