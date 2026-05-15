@@ -1,5 +1,5 @@
 import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
-import { aiSupportResolutionKeyboard, dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketAcceptKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
+import { aiSupportResolutionKeyboard, dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard, ticketUserResolutionKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
   createActivity,
@@ -528,15 +528,14 @@ async function createSupportTicketWithCode(
 }
 
 function ticketFollowUpReplyMarkup(ticket: SupportTicket) {
-  if (ticket.status === "open") return ticketAcceptKeyboard(ticket.id);
   if (ticket.status === "pending_user_resolution") return ticketUserResolutionKeyboard(ticket.id);
   return undefined;
 }
 
-function ticketFollowUpText(ticket: SupportTicket): string {
+function ticketFollowUpText(ticket: SupportTicket): string | null {
   const code = ticketLabel(ticket);
   if (ticket.status === "open") {
-    return `Ticket #${code} is still open. A registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
+    return `Ticket #${code} is still open. A registered support member can reply directly to this ticket to handle it.`;
   }
   if (ticket.status === "pending_user_resolution") {
     return `Ticket #${code} is still waiting for ${ticket.opened_by_name} to choose Solved or Not Solved. Please use the buttons below so a new ticket will not be opened for the same concern.`;
@@ -544,7 +543,7 @@ function ticketFollowUpText(ticket: SupportTicket): string {
   if (ticket.status === "pending_follow_up") {
     return `Ticket #${code} was moved to Pending Follow-up because there was no response to the Solved / Not Solved prompt within 30 minutes. This message reopens the same ticket for review.`;
   }
-  return `Ticket #${code} is still active${ticket.assigned_member_name ? ` with ${ticket.assigned_member_name}` : ""}.`;
+  return null;
 }
 
 async function removePreviousTicketBotPrompts(
@@ -621,6 +620,10 @@ async function recordCustomerTicketFollowUp(
   await removePreviousTicketBotPrompts(db, currentTicket, message.chat.id);
 
   const text = ticketFollowUpText(currentTicket);
+  if (!text) {
+    return;
+  }
+
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
     replyMarkup: ticketFollowUpReplyMarkup(currentTicket)
@@ -1036,7 +1039,7 @@ An available team member can handle this ticket.`;
   const sent = await sendMessage(message.chat.id, promptText, {
     parseMode: "HTML",
     replyToMessageId: sourceMessageId,
-    replyMarkup: scheduledMemberIsActive ? undefined : ticketAcceptKeyboard(ticket.id)
+    replyMarkup: undefined
   });
 
   await recordSupportTicketMessage(db, {
@@ -1150,7 +1153,7 @@ async function handleAiSupportMessage(
     : buildAiSupportAutoReplyText(ticket, match);
   const sent = await sendMessage(message.chat.id, replyText, {
     replyToMessageId: message.message_id,
-    replyMarkup: match.alwaysEscalate ? ticketAcceptKeyboard(ticket.id) : aiSupportResolutionKeyboard(ticket.id)
+    replyMarkup: match.alwaysEscalate ? undefined : aiSupportResolutionKeyboard(ticket.id)
   });
   await recordBotTicketMessage(db, ticket, sent.message_id, message.message_id, replyText, message.chat.id);
 }
@@ -1199,10 +1202,10 @@ async function handleAiSupportTicketFollowUp(
   });
 
   await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
-  const text = `Thanks for the update. A moderator will review ticket #${ticketLabel(updatedTicket)}.\n\nPlease make sure you have sent your wallet address, screenshot if available, transaction hash if available, and the exact error message.\n\nA registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
+  const text = `Thanks for the update. A moderator will review ticket #${ticketLabel(updatedTicket)}.\n\nPlease make sure you have sent your wallet address, screenshot if available, transaction hash if available, and the exact error message.\n\nA registered support member can reply directly to this ticket to handle it.`;
   const sent = await sendMessage(message.chat.id, text, {
     replyToMessageId: message.message_id,
-    replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
+    replyMarkup: undefined
   });
   await recordBotTicketMessage(db, updatedTicket, sent.message_id, message.message_id, text, message.chat.id);
 }
@@ -1282,10 +1285,10 @@ async function handleAiSupportCallback(db: SupabaseRestClient, callback: Telegra
 
     await deleteCallbackMessage(chatId, callback);
     await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
-    const text = `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A registered support member can reply directly to this ticket to handle it, or tap Accept Ticket to claim it first.`;
+    const text = `Ticket #${ticketLabel(updatedTicket)} is now marked as Needs Moderator Review. A registered support member can reply directly to this ticket to handle it.`;
     const sent = await sendMessage(chatId, text, {
       replyToMessageId: ticket.opened_message_id,
-      replyMarkup: ticketAcceptKeyboard(updatedTicket.id)
+      replyMarkup: undefined
     });
     await recordBotTicketMessage(db, updatedTicket, sent.message_id, ticket.opened_message_id, text, chatId);
     return;
