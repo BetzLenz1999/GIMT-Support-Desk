@@ -855,7 +855,7 @@ Ticket #${label} is now connected to ${registration.member_name} for handling.`;
   }
 
   if (coveredForMember) {
-    return `Update: ${coveredForMember.name} is the scheduled support member, but ${registration.member_name} is now assisting on this ticket.
+    return `Update: ${registration.member_name} is now assisting on this ticket.
 Ticket #${label} is now connected to ${registration.member_name} for handling.`;
   }
 

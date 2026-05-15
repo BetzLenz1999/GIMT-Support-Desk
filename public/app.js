@@ -1029,11 +1029,6 @@ function renderTicketRow(row, source = "tickets") {
   const status = pill(TICKET_STATUS_PILL[row.status] || "pill-slate", TICKET_STATUS_LABEL[row.status] || row.status);
   const assigned = row.assigned_member_name || "—";
   const scheduled = row.scheduled_member_name || "—";
-  const coverage = row.covered_for_member_name
-    ? `Covered for ${escapeHtml(row.covered_for_member_name)}${row.accepted_member_was_timed_in === false ? " · off-duty accept" : ""}`
-    : row.accepted_member_was_timed_in === false
-      ? "Accepted while not timed in"
-      : "—";
   const isExpanded = state[source]?.expandedIds?.has(row.id);
   const messageCount = (row.messages || []).length;
   const code = ticketDisplayCode(row);
@@ -1061,12 +1056,11 @@ function renderTicketRow(row, source = "tickets") {
       <td>${status}</td>
       <td>${escapeHtml(scheduled)}</td>
       <td>${escapeHtml(assigned)}</td>
-      <td>${escapeHtml(coverage)}</td>
       <td class="mono ticket-cell-nowrap">${escapeHtml(fmtTimeUtc(row.closed_at))}</td>
     </tr>
     ${isExpanded ? `
       <tr>
-        <td colspan="9" class="bg-slate-50 dark:bg-slate-950">
+        <td colspan="8" class="bg-slate-50 dark:bg-slate-950">
           ${renderTicketInsight(row)}
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Chat history for #${escapeHtml(code)}</div>
           ${renderTicketMessages(row)}
@@ -1092,7 +1086,7 @@ function renderTickets() {
   const tbody = $("#tickets-body");
   const rows = state.tickets.rows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No support tickets in this view.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No support tickets in this view.</td></tr>';
   } else {
     tbody.innerHTML = rows.map((row) => renderTicketRow(row, "tickets")).join("");
   }
@@ -1100,8 +1094,6 @@ function renderTickets() {
   const solvedCount = rows.filter((row) => row.status === "solved_closed").length;
   const notSolvedCount = rows.filter((row) => row.status === "not_solved_closed").length;
   const pendingFollowUpCount = rows.filter((row) => row.status === "pending_follow_up").length;
-  const coverageCount = rows.filter((row) => row.covered_for_member_id).length;
-  const offDutyCount = rows.filter((row) => row.accepted_member_was_timed_in === false).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
   renderIssueStats("#tickets-issue-stats", state.tickets.issueStats);
   const selectedGroup = state.tickets.filters.telegram_chat_id
@@ -1112,14 +1104,14 @@ function renderTickets() {
     : state.tickets.filters.telegram_chat_id
       ? `Chat ${state.tickets.filters.telegram_chat_id}`
       : "All groups";
-  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${solvedCount} solved · ${notSolvedCount} not solved · ${pendingFollowUpCount} pending follow-up · ${coverageCount} coverage handoff${coverageCount === 1 ? "" : "s"} · ${offDutyCount} off-duty accept${offDutyCount === 1 ? "" : "s"}`;
+  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${solvedCount} solved · ${notSolvedCount} not solved · ${pendingFollowUpCount} pending follow-up`;
 }
 
 function renderTicketSearch() {
   const tbody = $("#ticket-search-body");
   const rows = state.ticketSearch.rows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No tickets match this search.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">No tickets match this search.</td></tr>';
   } else {
     tbody.innerHTML = rows.map((row) => renderTicketRow(row, "ticketSearch")).join("");
   }
@@ -1140,14 +1132,14 @@ async function loadTicketSearch() {
   if (member_id) qs.set("member_id", member_id);
   if (status) qs.set("status", status);
 
-  $("#ticket-search-body").innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Searching…</td></tr>';
+  $("#ticket-search-body").innerHTML = '<tr><td colspan="8" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Searching…</td></tr>';
   try {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.ticketSearch.rows = data.tickets;
     state.ticketSearch.issueStats = data.issue_stats || [];
     renderTicketSearch();
   } catch (error) {
-    $("#ticket-search-body").innerHTML = `<tr><td colspan="9" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to search: ${escapeHtml(error.message)}</td></tr>`;
+    $("#ticket-search-body").innerHTML = `<tr><td colspan="8" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to search: ${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
@@ -1171,7 +1163,7 @@ async function loadTickets() {
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
 
-  $("#tickets-body").innerHTML = '<tr><td colspan="9" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Loading…</td></tr>';
+  $("#tickets-body").innerHTML = '<tr><td colspan="8" class="text-center text-sm text-slate-500 dark:text-slate-400 py-4">Loading…</td></tr>';
   try {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.tickets.rows = data.tickets;
@@ -1194,7 +1186,7 @@ async function loadTickets() {
     renderTicketsGroupFilter(state.tickets.groups);
     renderTickets();
   } catch (error) {
-    $("#tickets-body").innerHTML = `<tr><td colspan="9" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to load: ${escapeHtml(error.message)}</td></tr>`;
+    $("#tickets-body").innerHTML = `<tr><td colspan="8" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to load: ${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
