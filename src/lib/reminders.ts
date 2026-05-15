@@ -1,18 +1,14 @@
-import type { GroupActionType, Registration, SupabaseRestClient } from "./supabase.js";
-import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordGroupActionMessage, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
-import { sendTeamGroupMessage, sendTeamGroupMessageWithResult, sweepExpiredGroupActionMessages } from "./group-notifications.js";
-import { dashboardKeyboard, groupProofOfWorkKeyboard, groupTimeInKeyboard, groupTimeOutKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
-import { TEAM_SCHEDULE, getNextScheduledMember, getTeamMember } from "./team-schedule.js";
+import type { Registration, SupabaseRestClient } from "./supabase.js";
+import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
+import { sendTeamGroupMessage, sweepExpiredGroupActionMessages } from "./group-notifications.js";
+import { dashboardKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
+import { TEAM_SCHEDULE, getTeamMember } from "./team-schedule.js";
 import { sendMessage } from "./telegram.js";
 import type { InlineKeyboardMarkup } from "./telegram-types.js";
 import { formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, minutesBetween, signedMinutesBetween, utcDateKey } from "./time.js";
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function buildMention(registration: Pick<Registration, "telegram_user_id" | "member_name">): string {
-  return `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtml(registration.member_name)}</a>`;
 }
 
 type ReminderLanguage = "en" | "es";
@@ -25,15 +21,6 @@ function reminderLanguageForMember(member: Pick<Registration, "member_id" | "mem
     : "en";
 }
 
-function buildNextUpLine(currentMemberId: string, registrations: Registration[], language: ReminderLanguage = "en"): string {
-  const next = getNextScheduledMember(currentMemberId);
-  if (!next) return "";
-  const nextRegistration = registrations.find((r) => r.member_id === next.id);
-  const nextDisplay = nextRegistration ? buildMention(nextRegistration) : `<b>${escapeHtml(next.name)}</b>`;
-  return language === "es"
-    ? `\n\n🔁 Siguiente: ${nextDisplay} — por favor prepárate para hacer Time In.`
-    : `\n\n🔁 Up next: ${nextDisplay} — please prepare to Time In.`;
-}
 
 const PRE_SHIFT_ONE_HOUR_MINUTES = 60;
 const PRE_SHIFT_MINUTES = 10;
@@ -57,6 +44,7 @@ export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date(
   let errors = 0;
   const registrations = await listRegistrations(db);
 
+  // Attendance and proof-of-work reminder nudges stay private; group posts are not sent for these events.
   for (const registration of registrations) {
     try {
       const member = getTeamMember(registration.member_id);
@@ -72,7 +60,6 @@ export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date(
       const minutesUntilEnd = signedMinutesBetween(now, window.end);
       const minutesSinceEnd = signedMinutesBetween(window.end, now);
 
-      const mention = buildMention(registration);
       const language = reminderLanguageForMember(registration);
 
       if (!hasTimedIn && isDueBetween(minutesUntilStart, PRE_SHIFT_ONE_HOUR_MINUTES, PRE_SHIFT_MINUTES)) {
@@ -86,23 +73,7 @@ Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.en
 
 Shift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
 Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`;
-        const groupMessage = language === "es"
-          ? `👥 Recordatorio de Time In del equipo (1 hora)
-
-El turno de ${mention} empieza en ${startsIn}.
-Turno: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
-Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}
-
-👇 Toca abajo para hacer Time In o abre mi DM.`
-          : `👥 1-Hour Team Time In Reminder
-
-${mention}'s shift starts in ${startsIn}.
-Shift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
-Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}
-
-👇 Tap below to Time In, or open my DM.`;
         sent += await sendOnce(db, registration, window.workDateUtc, "pre_shift_1h", personalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_shift_1h", groupMessage, groupTimeInKeyboard(member.id), "time_in");
       }
 
       if (!hasTimedIn && isDueBetween(minutesUntilStart, PRE_SHIFT_MINUTES, 0)) {
@@ -116,23 +87,7 @@ Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.en
 
 Shift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
 Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`;
-        const groupMessage = language === "es"
-          ? `👥 Recordatorio de Time In del equipo (10 minutos)
-
-El turno de ${mention} empieza en ${startsIn}.
-Turno: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
-Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}
-
-👇 Toca abajo para hacer Time In o abre mi DM.`
-          : `👥 10-Minute Team Time In Reminder
-
-${mention}'s shift starts in ${startsIn}.
-Shift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
-Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}
-
-👇 Tap below to Time In, or open my DM.`;
         sent += await sendOnce(db, registration, window.workDateUtc, "pre_shift", personalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_shift", groupMessage, groupTimeInKeyboard(member.id), "time_in");
       }
 
       if (!hasTimedIn && minutesSinceStart >= 0 && minutesSinceStart < LATE_AFTER_MINUTES) {
@@ -147,23 +102,7 @@ Local: ${formatLocal(now, member.timezone)}`
 Please Time In now.
 UTC: ${formatUtc(now)} UTC
 Local: ${formatLocal(now, member.timezone)}`;
-        const groupMessage = language === "es"
-          ? `🟢 Turno iniciado: ${mention}
-
-Por favor asegúrense de que la cobertura esté activa.
-UTC: ${formatUtc(now)} UTC
-Local: ${formatLocal(now, member.timezone)}
-
-👇 Toca abajo para hacer Time In o abre mi DM.`
-          : `🟢 Shift Started: ${mention}
-
-Please make sure coverage is active.
-UTC: ${formatUtc(now)} UTC
-Local: ${formatLocal(now, member.timezone)}
-
-👇 Tap below to Time In, or open my DM.`;
         sent += await sendOnce(db, registration, window.workDateUtc, "shift_start", personalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "shift_start", groupMessage, groupTimeInKeyboard(member.id), "time_in");
       }
 
       if (!log?.actual_in_utc && isDueAfter(minutesSinceStart, LATE_AFTER_MINUTES)) {
@@ -180,29 +119,10 @@ You have not timed in yet.
 Scheduled In: ${formatUtc(window.start)} UTC
 Current: ${formatUtc(now)} UTC
 Late By: ${formatDuration(minutesSinceStart)}`;
-        const groupMessage = language === "es"
-          ? `⚠️ Alerta de retraso del equipo
-
-${mention} aún no ha hecho Time In.
-Entrada programada: ${formatUtc(window.start)} UTC
-Hora actual: ${formatUtc(now)} UTC
-Retraso: ${formatDuration(minutesSinceStart)}
-
-👇 Toca abajo para hacer Time In o abre mi DM.`
-          : `⚠️ Team Late Alert
-
-${mention} has not timed in yet.
-Scheduled In: ${formatUtc(window.start)} UTC
-Current: ${formatUtc(now)} UTC
-Late By: ${formatDuration(minutesSinceStart)}
-
-👇 Tap below to Time In, or open my DM.`;
         const latePersonalSent = await sendOnce(db, registration, window.workDateUtc, "late_warning", personalMessage, dashboardKeyboard());
-        const lateGroupSent = await sendGroupOnce(db, member.id, window.workDateUtc, "late_warning", groupMessage, groupTimeInKeyboard(member.id), "time_in");
         sent += latePersonalSent;
-        groupSent += lateGroupSent;
 
-        if (latePersonalSent > 0 || lateGroupSent > 0) {
+        if (latePersonalSent > 0) {
           await createActivity(db, {
             member_id: member.id,
             member_name: member.name,
@@ -216,14 +136,10 @@ Late By: ${formatDuration(minutesSinceStart)}
 
       if (hasTimedIn && !hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
         const personalProofMessage = buildProofOfWorkReminderMessage(member.name, window.end, member.timezone, language);
-        const groupProofMessage = buildProofOfWorkReminderMessage(mention, window.end, member.timezone, language);
         sent += await sendProofOfWorkOnce(db, registration, window.workDateUtc, window.end, now, "personal", personalProofMessage);
-        groupSent += await sendProofOfWorkGroupOnce(db, registration, window.workDateUtc, window.end, now, groupProofMessage, language);
       }
 
       if (!hasTimedOut && isDueBetween(minutesUntilEnd, PRE_OUT_MINUTES, 0)) {
-        const endsIn = formatDuration(minutesBetween(now, window.end));
-        const nextLine = buildNextUpLine(member.id, registrations, language);
         const personalMessage = language === "es"
           ? `⏰ Recordatorio de Time Out de 10 minutos
 
@@ -233,27 +149,10 @@ Por favor prepárate para hacer Time Out.`
 
 Scheduled Out: ${formatUtc(window.end)} UTC
 Please prepare to Time Out.`;
-        const groupMessage = language === "es"
-          ? `👥 Recordatorio de Time Out del equipo (10 minutos)
-
-El turno de ${mention} termina en ${endsIn}.
-Salida programada: ${formatUtc(window.end)} UTC
-Local: ${formatLocal(window.end, member.timezone)}${nextLine}
-
-👇 Toca abajo para hacer Time Out o abre mi DM.`
-          : `👥 10-Minute Team Time Out Reminder
-
-${mention}'s shift ends in ${endsIn}.
-Scheduled Out: ${formatUtc(window.end)} UTC
-Local: ${formatLocal(window.end, member.timezone)}${nextLine}
-
-👇 Tap below to Time Out, or open my DM.`;
         sent += await sendOnce(db, registration, window.workDateUtc, "pre_out", personalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "pre_out", groupMessage, groupTimeOutKeyboard(member.id), "time_out");
       }
 
       if (!hasTimedOut && minutesSinceEnd >= 0 && minutesSinceEnd < MISSING_OUT_AFTER_MINUTES) {
-        const nextLine = buildNextUpLine(member.id, registrations, language);
         const personalMessage = language === "es"
           ? `🔴 Turno terminado
 
@@ -265,23 +164,7 @@ Local: ${formatLocal(now, member.timezone)}`
 Please Time Out now.
 UTC: ${formatUtc(now)} UTC
 Local: ${formatLocal(now, member.timezone)}`;
-        const groupMessage = language === "es"
-          ? `🔴 Turno terminado: ${mention}
-
-Por favor asegúrense de que ${mention} haga Time Out.
-Salida programada: ${formatUtc(window.end)} UTC
-Local: ${formatLocal(window.end, member.timezone)}${nextLine}
-
-👇 Toca abajo para hacer Time Out o abre mi DM.`
-          : `🔴 Shift Ended: ${mention}
-
-Please make sure ${mention} times out.
-Scheduled Out: ${formatUtc(window.end)} UTC
-Local: ${formatLocal(window.end, member.timezone)}${nextLine}
-
-👇 Tap below to Time Out, or open my DM.`;
         sent += await sendOnce(db, registration, window.workDateUtc, "shift_end", personalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "shift_end", groupMessage, groupTimeOutKeyboard(member.id), "time_out");
       }
 
       if (!hasTimedOut && isDueAfter(minutesSinceEnd, MISSING_OUT_AFTER_MINUTES)) {
@@ -308,40 +191,8 @@ Hora actual: ${formatUtc(now)} UTC`
 No Time In or Time Out is recorded for this shift yet. Please open the bot and update your attendance.
 Scheduled Out: ${formatUtc(window.end)} UTC
 Current: ${formatUtc(now)} UTC`;
-        const missingOutGroupMessage = hasTimedIn
-          ? language === "es"
-            ? `⚠️ Falta Time Out del equipo
-
-${mention} aún no ha hecho Time Out.
-Salida programada: ${formatUtc(window.end)} UTC
-Hora actual: ${formatUtc(now)} UTC
-
-👇 Toca abajo para hacer Time Out o abre mi DM.`
-            : `⚠️ Team Missing Time Out
-
-${mention} has not timed out yet.
-Scheduled Out: ${formatUtc(window.end)} UTC
-Current: ${formatUtc(now)} UTC
-
-👇 Tap below to Time Out, or open my DM.`
-          : language === "es"
-            ? `⚠️ Falta Time Out del equipo
-
-${mention} no tiene Time In ni Time Out registrado para este turno.
-Salida programada: ${formatUtc(window.end)} UTC
-Hora actual: ${formatUtc(now)} UTC
-
-👇 Toca abajo para hacer Time Out o abre mi DM.`
-            : `⚠️ Team Missing Time Out
-
-${mention} has no Time In or Time Out recorded for this shift yet.
-Scheduled Out: ${formatUtc(window.end)} UTC
-Current: ${formatUtc(now)} UTC
-
-👇 Tap below to Time Out, or open my DM.`;
 
         sent += await sendOnce(db, registration, window.workDateUtc, "missing_out", missingOutPersonalMessage, dashboardKeyboard());
-        groupSent += await sendGroupOnce(db, member.id, window.workDateUtc, "missing_out", missingOutGroupMessage, groupTimeOutKeyboard(member.id), "time_out");
       }
     } catch (error) {
       errors += 1;
@@ -425,37 +276,6 @@ async function sendOnce(
   return 1;
 }
 
-async function sendGroupOnce(
-  db: SupabaseRestClient,
-  memberId: string,
-  workDateUtc: string,
-  eventType: string,
-  message: string,
-  replyMarkup?: InlineKeyboardMarkup,
-  actionType?: GroupActionType
-): Promise<number> {
-  const eventKey = `group:${memberId}:${workDateUtc}:${eventType}`;
-  if (await hasCronEvent(db, eventKey)) return 0;
-
-  const sent = await sendTeamGroupMessageWithResult(message, { parseMode: "HTML", replyMarkup });
-  if (!sent) return 0;
-
-  await recordCronEvent(db, eventKey, memberId, workDateUtc, `group_${eventType}`);
-
-  if (actionType && replyMarkup) {
-    await recordGroupActionMessage(db, {
-      member_id: memberId,
-      work_date_utc: workDateUtc,
-      action_type: actionType,
-      event_type: eventType,
-      telegram_chat_id: sent.chat.id,
-      telegram_message_id: sent.message_id
-    });
-  }
-
-  return 1;
-}
-
 
 function buildProofOfWorkReminderMessage(displayName: string, scheduledOut: Date, timezone: string, language: ReminderLanguage = "en"): string {
   if (language === "es") {
@@ -512,65 +332,6 @@ async function sendProofOfWorkOnce(
     send_at_utc: sendAtUtc,
     sent_at_utc: now.toISOString(),
     channel,
-    message,
-    status: "sent",
-    submitted_at_utc: null
-  });
-  return 1;
-}
-
-async function sendProofOfWorkGroupOnce(
-  db: SupabaseRestClient,
-  registration: { telegram_user_id: number; member_id: string; member_name: string },
-  workDateUtc: string,
-  scheduledOutUtc: Date,
-  now: Date,
-  message: string,
-  language: ReminderLanguage = "en"
-): Promise<number> {
-  const eventType = "group_proof_of_work_1h";
-  const eventKey = `group:${registration.member_id}:${workDateUtc}:proof_of_work_1h`;
-  if (await hasCronEvent(db, eventKey)) return 0;
-
-  const sendAtUtc = new Date(scheduledOutUtc.getTime() - PROOF_OF_WORK_REMINDER_MINUTES * 60_000).toISOString();
-  const heading = language === "es" ? "👥 Recordatorio de prueba de trabajo" : "👥 Proof of Work Reminder";
-  const sent = await sendTeamGroupMessageWithResult(`${heading}\n\n${message}`, { replyMarkup: groupProofOfWorkKeyboard(), parseMode: "HTML" });
-  if (!sent) {
-    await upsertProofOfWorkReminder(db, {
-      member_id: registration.member_id,
-      member_name: registration.member_name,
-      telegram_user_id: registration.telegram_user_id,
-      work_date_utc: workDateUtc,
-      scheduled_out_utc: scheduledOutUtc.toISOString(),
-      send_at_utc: sendAtUtc,
-      sent_at_utc: null,
-      channel: "group",
-      message,
-      status: "failed",
-      submitted_at_utc: null
-    });
-    return 0;
-  }
-
-  await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, eventType);
-
-  await recordGroupActionMessage(db, {
-    member_id: registration.member_id,
-    work_date_utc: workDateUtc,
-    action_type: "proof_of_work",
-    event_type: "proof_of_work_1h",
-    telegram_chat_id: sent.chat.id,
-    telegram_message_id: sent.message_id
-  });
-  await upsertProofOfWorkReminder(db, {
-    member_id: registration.member_id,
-    member_name: registration.member_name,
-    telegram_user_id: registration.telegram_user_id,
-    work_date_utc: workDateUtc,
-    scheduled_out_utc: scheduledOutUtc.toISOString(),
-    send_at_utc: sendAtUtc,
-    sent_at_utc: now.toISOString(),
-    channel: "group",
     message,
     status: "sent",
     submitted_at_utc: null
