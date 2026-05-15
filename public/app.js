@@ -50,7 +50,7 @@ const TICKET_STATUS_LABEL = {
   solved_closed: "Solved",
   not_solved_closed: "Not solved",
   closed_by_team: "Closed by team",
-  expired: "Expired"
+  expired: "Auto-closed"
 };
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1019,7 +1019,7 @@ function renderIssueStats(targetSelector, stats) {
           <div class="text-[10px] uppercase tracking-wide text-slate-400">tickets</div>
         </div>
       </div>
-      <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Solved: ${escapeHtml(stat.solved_count)} · Not solved: ${escapeHtml(stat.not_solved_count)}</div>
+      <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Closed: ${escapeHtml(stat.closed_count || 0)}</div>
       <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(stat.sample_summary)}</div>
     </div>
   `).join("");
@@ -1091,9 +1091,8 @@ function renderTickets() {
     tbody.innerHTML = rows.map((row) => renderTicketRow(row, "tickets")).join("");
   }
   updateTicketQueueButtons();
-  const solvedCount = rows.filter((row) => row.status === "solved_closed").length;
-  const notSolvedCount = rows.filter((row) => row.status === "not_solved_closed").length;
-  const pendingFollowUpCount = rows.filter((row) => row.status === "pending_follow_up").length;
+  const activeCount = rows.filter((row) => row.status === "open" || row.status === "accepted").length;
+  const closedCount = rows.filter((row) => row.closed_at || row.status === "expired" || String(row.status || "").endsWith("_closed")).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
   renderIssueStats("#tickets-issue-stats", state.tickets.issueStats);
   const selectedGroup = state.tickets.filters.telegram_chat_id
@@ -1104,7 +1103,7 @@ function renderTickets() {
     : state.tickets.filters.telegram_chat_id
       ? `Chat ${state.tickets.filters.telegram_chat_id}`
       : "All groups";
-  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${solvedCount} solved · ${notSolvedCount} not solved · ${pendingFollowUpCount} pending follow-up`;
+  $("#tickets-count").textContent = `${rows.length} ticket${rows.length === 1 ? "" : "s"} · ${groupLabel} · ${messageCount} logged message${messageCount === 1 ? "" : "s"} · ${activeCount} active · ${closedCount} closed`;
 }
 
 function renderTicketSearch() {

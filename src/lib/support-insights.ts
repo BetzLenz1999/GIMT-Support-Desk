@@ -26,6 +26,7 @@ export type SupportIssueStat = {
   count: number;
   open_count: number;
   needs_moderator_count: number;
+  closed_count: number;
   solved_count: number;
   not_solved_count: number;
   latest_at: string | null;
@@ -94,6 +95,7 @@ export function buildSupportIssueStats(tickets: Array<SupportTicket & { insight?
       count: 0,
       open_count: 0,
       needs_moderator_count: 0,
+      closed_count: 0,
       solved_count: 0,
       not_solved_count: 0,
       latest_at: null,
@@ -104,6 +106,7 @@ export function buildSupportIssueStats(tickets: Array<SupportTicket & { insight?
     current.count += 1;
     if (["open", "accepted", "pending_user_resolution", "pending_follow_up"].includes(ticket.status)) current.open_count += 1;
     if (ticket.insight?.dashboard_status === "Needs Moderator Review" || ticket.status === "open" || ticket.status === "accepted") current.needs_moderator_count += 1;
+    if (ticket.closed_at || ticket.status === "expired" || ticket.status.endsWith("_closed")) current.closed_count += 1;
     if (ticket.status === "solved_closed") current.solved_count += 1;
     if (ticket.status === "not_solved_closed") current.not_solved_count += 1;
     if (!current.latest_at || new Date(ticket.created_at).getTime() > new Date(current.latest_at).getTime()) {
@@ -192,10 +195,10 @@ function buildSummary(ticket: SupportTicket, category: AiSupportCategory, custom
 }
 
 function buildNextAction(ticket: SupportTicket, category: AiSupportCategory, attachmentCount: number): string {
+  if (ticket.status === "expired") return "No action needed; ticket auto-closed after 30 minutes without a requester message.";
   if (ticket.status === "solved_closed") return "No action needed; requester confirmed solved.";
   if (ticket.status === "not_solved_closed") return "Review as not solved; check history and re-open with a moderator reply if needed.";
-  if (ticket.status === "pending_user_resolution") return "Wait for requester to confirm solved, or review if they send a follow-up.";
-  if (ticket.status === "pending_follow_up") return "Requester did not respond to the solved/not-solved prompt; continue in the same ticket if they message again.";
+  if (ticket.status === "pending_user_resolution" || ticket.status === "pending_follow_up") return "Legacy ticket state; review the conversation and wait for auto-close or a new requester message.";
   if (category === "Unknown Issue") return "Ask for a short issue description, screenshot, wallet address if relevant, and exact error message.";
   if (attachmentCount === 0 && ["Face Verification Failed", "GoodWallet Claiming Failed", "Cannot Claim G$", "Transaction Failed", "Reward Not Received"].includes(category)) {
     return "Ask for screenshot/error details and verify the evidence checklist before escalating.";

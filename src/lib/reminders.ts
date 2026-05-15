@@ -1,5 +1,5 @@
-import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket } from "./supabase.js";
-import { createActivity, findTimeLog, hasCronEvent, listRegistrations, listSupportTicketsPendingResolutionTimeout, recordCronEvent, recordGroupActionMessage, recordSupportTicketEvent, recordSupportTicketMessage, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
+import type { GroupActionType, Registration, SupabaseRestClient } from "./supabase.js";
+import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordGroupActionMessage, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
 import { sendTeamGroupMessage, sendTeamGroupMessageWithResult, sweepExpiredGroupActionMessages } from "./group-notifications.js";
 import { dashboardKeyboard, groupProofOfWorkKeyboard, groupTimeInKeyboard, groupTimeOutKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
 import { TEAM_SCHEDULE, getNextScheduledMember, getTeamMember } from "./team-schedule.js";
@@ -41,7 +41,7 @@ const PRE_OUT_MINUTES = 10;
 const PROOF_OF_WORK_REMINDER_MINUTES = 60;
 const LATE_AFTER_MINUTES = 5;
 const MISSING_OUT_AFTER_MINUTES = 5;
-const SUPPORT_TICKET_RESOLUTION_TIMEOUT_MINUTES = 30;
+const SUPPORT_TICKET_INACTIVITY_TIMEOUT_MINUTES = 30;
 
 function isDueBetween(minutesUntilTarget: number, startMinutesBefore: number, stopMinutesBefore: number): boolean {
   return minutesUntilTarget <= startMinutesBefore && minutesUntilTarget > stopMinutesBefore;
@@ -51,7 +51,7 @@ function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): bool
   return minutesSinceTarget >= startMinutesAfter;
 }
 
-export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; sweptExpired: number; pendingFollowUpTickets: number; errors: number }> {
+export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
   let sent = 0;
   let groupSent = 0;
   let errors = 0;
@@ -367,15 +367,15 @@ Current: ${formatUtc(now)} UTC
     console.error(`Expired group action sweep failed: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 
-  let pendingFollowUpTickets = 0;
+  let inactiveClosedTickets = 0;
   try {
-    pendingFollowUpTickets = await sweepPendingSupportTicketResolutionPrompts(db, now);
+    inactiveClosedTickets = await sweepInactiveSupportTickets(db, now);
   } catch (error) {
     errors += 1;
-    console.error(`Pending support ticket resolution sweep failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    console.error(`Inactive support ticket sweep failed: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 
-  return { sent, groupSent, sweptExpired, pendingFollowUpTickets, errors };
+  return { sent, groupSent, sweptExpired, inactiveClosedTickets, errors };
 }
 
 async function sendUnregisteredMembersReminder(
@@ -578,63 +578,59 @@ async function sendProofOfWorkGroupOnce(
   return 1;
 }
 
-
-function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string {
-  return ticket.ticket_code ?? ticket.id.slice(0, 8);
-}
-
-async function sweepPendingSupportTicketResolutionPrompts(
+async function sweepInactiveSupportTickets(
   db: SupabaseRestClient,
   now: Date
 ): Promise<number> {
-  const cutoff = new Date(now.getTime() - SUPPORT_TICKET_RESOLUTION_TIMEOUT_MINUTES * 60_000).toISOString();
-  const tickets = await listSupportTicketsPendingResolutionTimeout(db, cutoff);
-  let moved = 0;
+  const cutoff = new Date(now.getTime() - SUPPORT_TICKET_INACTIVITY_TIMEOUT_MINUTES * 60_000).toISOString();
+  const tickets = await listActiveSupportTicketsForInactivitySweep(db);
+  if (!tickets.length) return 0;
 
+  const messages = await listSupportTicketMessages(db, tickets.map((ticket) => ticket.id));
+  const latestCustomerMessageByTicket = new Map<string, string>();
+
+  for (const message of messages) {
+    if (message.sender_type !== "customer") continue;
+
+    const current = latestCustomerMessageByTicket.get(message.ticket_id);
+    if (!current || new Date(message.message_date_utc).getTime() > new Date(current).getTime()) {
+      latestCustomerMessageByTicket.set(message.ticket_id, message.message_date_utc);
+    }
+  }
+
+  let closed = 0;
   for (const ticket of tickets) {
-    const movedAt = now.toISOString();
+    const latestCustomerMessageAt = latestCustomerMessageByTicket.get(ticket.id);
+    if (!latestCustomerMessageAt || latestCustomerMessageAt > cutoff) continue;
+
+    const closedAt = now.toISOString();
     const updatedTicket = await updateSupportTicket(db, ticket.id, {
-      status: "pending_follow_up",
-      pending_follow_up_at: movedAt
+      status: "expired",
+      resolution_requested_at: null,
+      pending_follow_up_at: null,
+      closed_at: closedAt
     });
 
     await recordSupportTicketEvent(db, {
       ticket_id: ticket.id,
-      event_type: "ticket_pending_follow_up",
+      event_type: "ticket_auto_closed_no_customer_response",
       actor_telegram_user_id: null,
       actor_name: "System",
       actor_type: "system",
       telegram_chat_id: ticket.telegram_chat_id,
       telegram_message_id: null,
       metadata: {
-        reason: "No requester response to resolution prompt within 30 minutes",
-        resolutionRequestedAt: ticket.resolution_requested_at,
-        pendingFollowUpAt: movedAt
+        reason: "No requester message on the active ticket within 30 minutes",
+        previousStatus: ticket.status,
+        status: updatedTicket.status,
+        latestCustomerMessageAt,
+        cutoff,
+        closedAt
       }
     });
 
-    const text = `⏳ Ticket #${ticketLabel(updatedTicket)} moved to Pending Follow-up. No Solved / Not Solved response was received within 30 minutes. If ${ticket.opened_by_name} still needs help, they can send a new message and this same ticket will reopen instead of creating a new one.`;
-    try {
-      const sent = await sendMessage(ticket.telegram_chat_id, text, { replyToMessageId: ticket.opened_message_id });
-      await recordSupportTicketMessage(db, {
-        ticket_id: ticket.id,
-        telegram_chat_id: sent.chat.id,
-        telegram_message_id: sent.message_id,
-        reply_to_message_id: ticket.opened_message_id,
-        telegram_user_id: null,
-        sender_name: "Bot",
-        sender_type: "bot",
-        message_text: text,
-        message_date_utc: movedAt
-      });
-    } catch (error) {
-      console.error(
-        `Failed to notify pending follow-up for support ticket ${ticket.id}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-
-    moved += 1;
+    closed += 1;
   }
 
-  return moved;
+  return closed;
 }

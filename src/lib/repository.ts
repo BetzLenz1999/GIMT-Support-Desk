@@ -465,17 +465,15 @@ export async function listRecentBotSupportTicketMessages(
 }
 
 
-export async function listSupportTicketsPendingResolutionTimeout(
+export async function listActiveSupportTicketsForInactivitySweep(
   db: SupabaseRestClient,
-  olderThanUtc: string,
-  rowLimit = 100
+  rowLimit = 200
 ): Promise<SupportTicket[]> {
   return db.select<SupportTicket>(
     "support_tickets",
     params(
-      eq("status", "pending_user_resolution"),
-      lte("resolution_requested_at", olderThanUtc),
-      order("resolution_requested_at", true),
+      inList("status", ACTIVE_SUPPORT_TICKET_STATUSES),
+      order("created_at", true),
       limit(rowLimit)
     )
   );
