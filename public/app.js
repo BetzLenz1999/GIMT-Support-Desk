@@ -79,11 +79,13 @@ const state = {
   tickets: {
     rows: [],
     groups: [],
+    issueStats: [],
     filters: { assigned_member_id: "", scheduled_member_id: "", status: "", telegram_chat_id: "" },
     expandedIds: new Set()
   },
   ticketSearch: {
     rows: [],
+    issueStats: [],
     filters: { q: "", member_id: "", status: "" },
     expandedIds: new Set()
   },
@@ -964,6 +966,65 @@ function renderTicketMessages(row) {
   `;
 }
 
+function renderTicketInsight(row) {
+  const insight = row.insight;
+  if (!insight) return "";
+  const risks = Array.isArray(insight.risk_flags) && insight.risk_flags.length
+    ? insight.risk_flags.map((flag) => `<li>${escapeHtml(flag)}</li>`).join("")
+    : "<li>No automatic risk flags.</li>";
+  const evidence = Array.isArray(insight.evidence_checklist) && insight.evidence_checklist.length
+    ? insight.evidence_checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : "<li>No checklist available.</li>";
+
+  return `
+    <div class="mb-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div class="rounded-lg border border-teal-200 dark:border-teal-900 bg-teal-50 dark:bg-teal-950/30 p-3">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">Conversation summary</div>
+        <p class="mt-1 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">${escapeHtml(insight.summary)}</p>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400"><strong>Next action:</strong> ${escapeHtml(insight.next_action)}</p>
+      </div>
+      <div class="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-3">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Translation assist</div>
+        <p class="mt-1 text-sm text-slate-700 dark:text-slate-200">${escapeHtml(insight.detected_language?.name || "Unknown")} · ${escapeHtml(insight.detected_language?.confidence || "low")} confidence</p>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(insight.english_translation_assist)}</p>
+      </div>
+      <div class="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-3">
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Review checklist</div>
+        <ul class="mt-1 text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-1">${evidence}</ul>
+        <div class="mt-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Risk flags</div>
+        <ul class="mt-1 text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-1">${risks}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function renderIssueStats(targetSelector, stats) {
+  const target = $(targetSelector);
+  if (!target) return;
+  const topStats = (stats || []).slice(0, 5);
+  if (!topStats.length) {
+    target.innerHTML = '<p class="text-xs text-slate-500 dark:text-slate-400">No repeated issue data in this view yet.</p>';
+    return;
+  }
+
+  target.innerHTML = topStats.map((stat) => `
+    <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(stat.category)}</div>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Latest: ${escapeHtml(fmtTimeUtc(stat.latest_at))}${stat.sample_ticket_code ? ` · #${escapeHtml(stat.sample_ticket_code)}` : ""}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-bold text-teal-700 dark:text-teal-300">${escapeHtml(stat.count)}</div>
+          <div class="text-[10px] uppercase tracking-wide text-slate-400">tickets</div>
+        </div>
+      </div>
+      <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Solved: ${escapeHtml(stat.solved_count)} · Not solved: ${escapeHtml(stat.not_solved_count)}</div>
+      <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(stat.sample_summary)}</div>
+    </div>
+  `).join("");
+}
+
 function renderTicketRow(row, source = "tickets") {
   const status = pill(TICKET_STATUS_PILL[row.status] || "pill-slate", TICKET_STATUS_LABEL[row.status] || row.status);
   const assigned = row.assigned_member_name || "—";
@@ -1006,6 +1067,7 @@ function renderTicketRow(row, source = "tickets") {
     ${isExpanded ? `
       <tr>
         <td colspan="9" class="bg-slate-50 dark:bg-slate-950">
+          ${renderTicketInsight(row)}
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Chat history for #${escapeHtml(code)}</div>
           ${renderTicketMessages(row)}
         </td>
@@ -1041,6 +1103,7 @@ function renderTickets() {
   const coverageCount = rows.filter((row) => row.covered_for_member_id).length;
   const offDutyCount = rows.filter((row) => row.accepted_member_was_timed_in === false).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
+  renderIssueStats("#tickets-issue-stats", state.tickets.issueStats);
   const selectedGroup = state.tickets.filters.telegram_chat_id
     ? state.tickets.groups.find((group) => String(group.telegram_chat_id) === state.tickets.filters.telegram_chat_id)
     : null;
@@ -1061,6 +1124,7 @@ function renderTicketSearch() {
     tbody.innerHTML = rows.map((row) => renderTicketRow(row, "ticketSearch")).join("");
   }
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
+  renderIssueStats("#ticket-search-issue-stats", state.ticketSearch.issueStats);
   const activeFilters = [
     state.ticketSearch.filters.q ? `search: “${state.ticketSearch.filters.q}”` : "",
     state.ticketSearch.filters.member_id ? "team member selected" : "",
@@ -1080,6 +1144,7 @@ async function loadTicketSearch() {
   try {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.ticketSearch.rows = data.tickets;
+    state.ticketSearch.issueStats = data.issue_stats || [];
     renderTicketSearch();
   } catch (error) {
     $("#ticket-search-body").innerHTML = `<tr><td colspan="9" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to search: ${escapeHtml(error.message)}</td></tr>`;
@@ -1110,6 +1175,7 @@ async function loadTickets() {
   try {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.tickets.rows = data.tickets;
+    state.tickets.issueStats = data.issue_stats || [];
     const groupsById = new Map(state.tickets.groups.map((group) => [String(group.telegram_chat_id), group]));
     for (const ticket of data.tickets) {
       if (!ticket.telegram_chat_id) continue;

@@ -1,6 +1,7 @@
 import { eq, inList, limit, order, params, type SupportTicket, type SupportTicketMessage, type TelegramGroup } from "../../src/lib/supabase.js";
 import { getSupabase } from "../../src/lib/supabase.js";
 import { listSupportTicketMessages } from "../../src/lib/repository.js";
+import { buildSupportIssueStats, buildSupportTicketInsight } from "../../src/lib/support-insights.js";
 
 function sendJson(response: any, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
@@ -62,11 +63,15 @@ export default async function handler(request: any, response: any) {
       (acc[message.ticket_id] ??= []).push(message);
       return acc;
     }, {});
-    const ticketsWithMessages = tickets.map((ticket) => ({
-      ...ticket,
-      group_title: ticket.group_title || groupsByChatId.get(ticket.telegram_chat_id)?.title || null,
-      messages: messagesByTicket[ticket.id] ?? []
-    }));
+    const ticketsWithMessages = tickets.map((ticket) => {
+      const ticketMessages = messagesByTicket[ticket.id] ?? [];
+      return {
+        ...ticket,
+        group_title: ticket.group_title || groupsByChatId.get(ticket.telegram_chat_id)?.title || null,
+        messages: ticketMessages,
+        insight: buildSupportTicketInsight(ticket, ticketMessages)
+      };
+    });
 
     const searchableTickets = ticketsWithMessages.filter((ticket) => {
       const memberMatches = !memberId || [
@@ -88,6 +93,13 @@ export default async function handler(request: any, response: any) {
         ticket.covered_for_member_name,
         ticket.group_title,
         ticket.telegram_chat_id,
+        ticket.insight?.category,
+        ticket.insight?.dashboard_status,
+        ticket.insight?.detected_language?.name,
+        ticket.insight?.summary,
+        ticket.insight?.next_action,
+        ticket.insight?.english_translation_assist,
+        ...(ticket.insight?.risk_flags ?? []),
         ...ticket.messages.flatMap((message) => [
           message.sender_name,
           message.sender_type,
@@ -112,7 +124,15 @@ export default async function handler(request: any, response: any) {
         accepted_during_own_shift: ticket.accepted_during_own_shift
       }));
 
-    sendJson(response, 200, { ok: true, count: searchableTickets.length, tickets: searchableTickets, coverage });
+    const issueStats = buildSupportIssueStats(searchableTickets);
+
+    sendJson(response, 200, {
+      ok: true,
+      count: searchableTickets.length,
+      tickets: searchableTickets,
+      coverage,
+      issue_stats: issueStats
+    });
   } catch (error) {
     sendJson(response, 500, {
       ok: false,
