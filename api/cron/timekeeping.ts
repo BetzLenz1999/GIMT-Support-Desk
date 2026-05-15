@@ -22,7 +22,7 @@ export default async function handler(request: any, response: any) {
     const startedAt = new Date();
     console.log(`[cron-timekeeping] started at ${startedAt.toISOString()}`);
     const result = await runTimekeepingCron(getSupabase(), startedAt);
-    console.log(`[cron-timekeeping] completed: sent=${result.sent}, groupSent=${result.groupSent}, sweptExpired=${result.sweptExpired}, pendingFollowUpTickets=${result.pendingFollowUpTickets}, errors=${result.errors}`);
+    console.log(`[cron-timekeeping] completed: sent=${result.sent}, groupSent=${result.groupSent}, sweptExpired=${result.sweptExpired}, inactiveClosedTickets=${result.inactiveClosedTickets}, errors=${result.errors}`);
     sendJson(response, 200, { ok: true, ranAt: startedAt.toISOString(), ...result });
   } catch (error) {
     console.error(error);

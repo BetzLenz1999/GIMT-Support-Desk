@@ -65,11 +65,12 @@ export default async function handler(request: any, response: any) {
     }, {});
     const ticketsWithMessages = tickets.map((ticket) => {
       const ticketMessages = messagesByTicket[ticket.id] ?? [];
+      const visibleMessages = ticketMessages.filter((message) => message.sender_type !== "bot");
       return {
         ...ticket,
         group_title: ticket.group_title || groupsByChatId.get(ticket.telegram_chat_id)?.title || null,
-        messages: ticketMessages,
-        insight: buildSupportTicketInsight(ticket, ticketMessages)
+        messages: visibleMessages,
+        insight: buildSupportTicketInsight(ticket, visibleMessages)
       };
     });
 
