@@ -212,6 +212,18 @@ export async function upsertProofOfWorkReminder(
   ));
 }
 
+export async function findProofOfWorkSubmission(
+  db: SupabaseRestClient,
+  memberId: string,
+  workDateUtc: string
+): Promise<ProofOfWorkSubmission | null> {
+  const rows = await db.select<ProofOfWorkSubmission>(
+    "proof_of_work_submissions",
+    params(eq("member_id", memberId), eq("work_date_utc", workDateUtc), limit(1))
+  );
+  return rows[0] ?? null;
+}
+
 export async function createProofOfWorkSubmission(
   db: SupabaseRestClient,
   payload: Omit<ProofOfWorkSubmission, "id" | "created_at">

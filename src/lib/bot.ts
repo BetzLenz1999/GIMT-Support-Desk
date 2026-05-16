@@ -9,6 +9,7 @@ import {
   findActiveSupportTicketForUser,
   findRegistrationByMemberId,
   findRegistrationByUser,
+  findProofOfWorkSubmission,
   findSavedCommandForUser,
   findSupportTicketById,
   findTimeLog,
@@ -1288,7 +1289,7 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
     await editMessageText(
       chatId,
       messageId,
-      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot links, or any valid non-empty text are accepted.\n\nDeadline: ${formatUtc(proofEligibility.window.end)} UTC. Proof submission closes after your scheduled Time Out.`,
+      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot links, or any valid non-empty text are accepted.\n\nScheduled Out: ${formatUtc(proofEligibility.window.end)} UTC. Proof submitted after this time will be marked Late.`,
       { replyMarkup: homeKeyboard() }
     );
     return;
@@ -1376,7 +1377,7 @@ async function handleStatefulReply(
     }
 
     const window = proofEligibility.window;
-    const status: string = "submitted";
+    const status = now.getTime() > window.end.getTime() ? "late" : "submitted";
     const proofType = getProofType(reason);
 
     await createProofOfWorkSubmission(db, {
@@ -1405,7 +1406,7 @@ async function handleStatefulReply(
 
     await sendMessage(
       message.chat.id,
-      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: Submitted\nType: ${proofType}`,
+      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: ${status === "late" ? "Late" : "Submitted"}\nType: ${proofType}`,
       { replyMarkup: dashboardKeyboard() }
     );
 
@@ -1567,17 +1568,11 @@ async function getProofSubmissionEligibility(
     };
   }
 
-  if (log.actual_out_utc) {
+  const existingSubmission = await findProofOfWorkSubmission(db, member.id, window.workDateUtc);
+  if (existingSubmission) {
     return {
       allowed: false,
-      message: `📎 Proof of Work submission is already closed because you have already timed out for this shift.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
-    };
-  }
-
-  if (now.getTime() > window.end.getTime()) {
-    return {
-      allowed: false,
-      message: `📎 Proof of Work submission is closed. Proof must be submitted before your scheduled Time Out.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
+      message: `📎 You have already submitted proof of work for this work date. Only one proof submission is accepted per team member per day.\n\nWork Date: ${window.workDateUtc}\nSubmitted: ${formatUtc(new Date(existingSubmission.submitted_at_utc))} UTC\nStatus: ${existingSubmission.status === "late" ? "Late" : "Submitted"}`
     };
   }
 

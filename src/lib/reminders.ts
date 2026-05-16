@@ -279,10 +279,10 @@ async function sendOnce(
 
 function buildProofOfWorkReminderMessage(displayName: string, scheduledOut: Date, timezone: string, language: ReminderLanguage = "en"): string {
   if (language === "es") {
-    return `Hola ${displayName}, por favor adjunta aquí tu prueba de trabajo antes de que termine tu horario. Se aceptan enlaces, notas, enlaces de usuarios/respondientes, enlaces de capturas de pantalla o cualquier prueba válida.\n\n⚠️ Importante: el envío de prueba solo funciona mientras tienes Time In activo. Se cierra después de tu Time Out programado.\n\nSalida programada: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
+    return `Hola ${displayName}, por favor adjunta aquí tu prueba de trabajo. Se aceptan enlaces, notas, enlaces de usuarios/respondientes, enlaces de capturas de pantalla o cualquier prueba válida.\n\n⚠️ Importante: se acepta un solo envío de prueba por fecha de trabajo. La prueba enviada después de tu Time Out programado se marcará como Late.\n\nSalida programada: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
   }
 
-  return `Hi ${displayName}, please attach your proof of work here before your work time ends. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.\n\n⚠️ Important: proof submission only works while you are actively timed in. It closes after your scheduled Time Out.\n\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
+  return `Hi ${displayName}, please attach your proof of work here. Links, notes, user/respondent links, screenshot links, or any valid proof are accepted.\n\n⚠️ Important: one proof submission is accepted per work date. Proof sent after your scheduled Time Out will be marked Late.\n\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nLocal: ${formatLocal(scheduledOut, timezone)}`;
 }
 
 async function sendProofOfWorkOnce(

@@ -146,7 +146,8 @@ create table if not exists public.proof_of_work_submissions (
   proof_type text not null default 'text' check (proof_type in ('link', 'text', 'mixed')),
   status text not null default 'submitted' check (status in ('submitted', 'late')),
   source_chat_id bigint,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique(member_id, work_date_utc)
 );
 
 create index if not exists proof_of_work_reminders_member_date_idx on public.proof_of_work_reminders(member_id, work_date_utc);
