@@ -39,7 +39,7 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getFile, sendMessage } from "./telegram.js";
+import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getChatMember, getFile, sendMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { getSupportMode } from "./config.js";
 import { detectAiSupportTemplate, type AiSupportDashboardStatus, type AiSupportMatch } from "./ai-support.js";
@@ -181,6 +181,40 @@ async function trackGroupMessage(
       );
     }
 
+    const messageText = message.text?.trim() ?? "";
+    const isSlashCommand = messageText.startsWith("/");
+
+    if (isSlashCommand) {
+      const admin = await isUserChatAdmin(message.chat.id, user.id);
+      if (admin) {
+        await rememberTelegramGroup(db, message.chat);
+        const adminSaver: Saver = {
+          telegram_user_id: user.id,
+          member_id: `admin_${user.id}`,
+          member_name: getTelegramUserDisplayName(user)
+        };
+
+        if (isSaveCommand(message)) {
+          await runSaveCommandSafely(db, message, adminSaver);
+          return;
+        }
+
+        if (await runSavedCommandPlaybackSafely(db, message, adminSaver)) {
+          return;
+        }
+
+        console.info(
+          `Ignoring unknown group command "${getCommand(messageText)}" from group admin ${user.id} in chat ${message.chat.id}. No frontend response will be sent.`
+        );
+        return;
+      }
+
+      console.info(
+        `Ignoring slash command "${getCommand(messageText)}" from unregistered non-admin user ${user.id} in chat ${message.chat.id}. No ticket opened, no frontend response sent.`
+      );
+      return;
+    }
+
     const activeTicket = await findActiveSupportTicketForUser(db, message.chat.id, user.id);
     if (activeTicket) {
       if (getSupportMode() === "ai" && isAiSupportTicket(activeTicket)) {
@@ -205,11 +239,11 @@ async function trackGroupMessage(
   await rememberTelegramGroup(db, message.chat);
 
   if (isSaveCommand(message)) {
-    await handleSaveCommand(db, message, registration);
+    await runSaveCommandSafely(db, message, registration);
     return;
   }
 
-  if (await handleSavedCommandPlayback(db, message, registration)) {
+  if (await runSavedCommandPlaybackSafely(db, message, registration)) {
     return;
   }
 
@@ -599,10 +633,58 @@ async function recordCustomerTicketFollowUp(
   await removePreviousTicketBotPrompts(db, currentTicket, message.chat.id);
 }
 
+type Saver = Pick<Registration, "telegram_user_id" | "member_id" | "member_name">;
+
+async function isUserChatAdmin(chatId: number, userId: number): Promise<boolean> {
+  const chatMember = await getChatMember(chatId, userId);
+  if (!chatMember) return false;
+  return chatMember.status === "creator" || chatMember.status === "administrator";
+}
+
+async function runSaveCommandSafely(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  saver: Saver
+): Promise<void> {
+  try {
+    await handleSaveCommand(db, message, saver);
+  } catch (error) {
+    console.error(
+      `handleSaveCommand failed for user ${saver.telegram_user_id} in chat ${message.chat.id}:`,
+      error
+    );
+    try {
+      await sendMessage(
+        message.chat.id,
+        "I couldn't save that just now. Please try again in a moment, or reply /save <name> to a post you sent.",
+        { replyToMessageId: message.message_id }
+      );
+    } catch (sendError) {
+      console.error(`Failed to send /save error message in chat ${message.chat.id}:`, sendError);
+    }
+  }
+}
+
+async function runSavedCommandPlaybackSafely(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  saver: Saver
+): Promise<boolean> {
+  try {
+    return await handleSavedCommandPlayback(db, message, saver);
+  } catch (error) {
+    console.error(
+      `handleSavedCommandPlayback failed for user ${saver.telegram_user_id} in chat ${message.chat.id}:`,
+      error
+    );
+    return true;
+  }
+}
+
 async function handleSaveCommand(
   db: SupabaseRestClient,
   message: TelegramMessage,
-  registration: Registration
+  saver: Saver
 ): Promise<void> {
   const commandName = getSaveCommandName(message);
   if (!commandName) {
@@ -622,7 +704,7 @@ async function handleSaveCommand(
     return;
   }
 
-  if (!sourceMessage.from || sourceMessage.from.id !== registration.telegram_user_id) {
+  if (!sourceMessage.from || sourceMessage.from.id !== saver.telegram_user_id) {
     await sendMessage(message.chat.id, "You can only save posts that you originally sent.", {
       replyToMessageId: message.message_id
     });
@@ -630,9 +712,9 @@ async function handleSaveCommand(
   }
 
   await upsertSavedCommand(db, {
-    owner_telegram_user_id: registration.telegram_user_id,
-    owner_member_id: registration.member_id,
-    owner_member_name: registration.member_name,
+    owner_telegram_user_id: saver.telegram_user_id,
+    owner_member_id: saver.member_id,
+    owner_member_name: saver.member_name,
     command_name: commandName,
     source_chat_id: sourceMessage.chat.id,
     source_message_id: sourceMessage.message_id,
@@ -647,18 +729,18 @@ async function handleSaveCommand(
 async function handleSavedCommandPlayback(
   db: SupabaseRestClient,
   message: TelegramMessage,
-  registration: Registration
+  saver: Saver
 ): Promise<boolean> {
   const commandName = getDynamicSavedCommandName(message);
   if (!commandName) return false;
 
-  const savedCommand = await findSavedCommandForTeam(db, commandName, registration.telegram_user_id);
+  const savedCommand = await findSavedCommandForTeam(db, commandName, saver.telegram_user_id);
   if (!savedCommand) {
     const firstToken = message.text?.trim().split(/\s+/, 1)[0] ?? "";
     if (hasBotMention(firstToken)) return false;
 
     console.info(
-      `Ignoring unknown group command /${commandName} from member ${registration.member_id} (Telegram user ${registration.telegram_user_id}) in chat ${message.chat.id}. No frontend response will be sent.`
+      `Ignoring unknown group command /${commandName} from saver ${saver.member_id} (Telegram user ${saver.telegram_user_id}) in chat ${message.chat.id}. No frontend response will be sent.`
     );
     return true;
   }
