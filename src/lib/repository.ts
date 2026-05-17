@@ -1,5 +1,4 @@
 import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
-import { TEAM_SCHEDULE } from "./team-schedule.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -97,8 +96,6 @@ export async function findSavedCommandForUser(
   return rows[0] ?? null;
 }
 
-const TEAM_MEMBER_IDS: ReadonlyArray<string> = TEAM_SCHEDULE.map((member) => member.id);
-
 export async function findSavedCommandForTeam(
   db: SupabaseRestClient,
   commandName: string,
@@ -108,7 +105,6 @@ export async function findSavedCommandForTeam(
     "saved_commands",
     params(
       eq("command_name", commandName),
-      inList("owner_member_id", TEAM_MEMBER_IDS),
       order("updated_at", false),
       limit(50)
     )

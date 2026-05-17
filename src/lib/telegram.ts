@@ -222,3 +222,37 @@ export type TelegramChatInfo = {
 export async function getChat(chatId: number): Promise<TelegramChatInfo> {
   return telegramApi<TelegramChatInfo>("getChat", { chat_id: chatId });
 }
+
+export type TelegramChatMemberStatus =
+  | "creator"
+  | "administrator"
+  | "member"
+  | "restricted"
+  | "left"
+  | "kicked";
+
+export type TelegramChatMember = {
+  status: TelegramChatMemberStatus;
+  user: {
+    id: number;
+    is_bot?: boolean;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+  };
+};
+
+export async function getChatMember(chatId: number, userId: number): Promise<TelegramChatMember | null> {
+  try {
+    return await telegramApi<TelegramChatMember>("getChatMember", {
+      chat_id: chatId,
+      user_id: userId
+    });
+  } catch (error) {
+    if (error instanceof TelegramApiError) {
+      console.warn(`getChatMember failed for chat ${chatId} user ${userId}: ${error.description}`);
+      return null;
+    }
+    throw error;
+  }
+}
