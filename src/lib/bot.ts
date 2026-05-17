@@ -10,7 +10,7 @@ import {
   findRegistrationByMemberId,
   findRegistrationByUser,
   findProofOfWorkSubmission,
-  findSavedCommandForUser,
+  findSavedCommandForTeam,
   findSupportTicketById,
   findTimeLog,
   listRecentBotSupportTicketMessages,
@@ -652,7 +652,7 @@ async function handleSavedCommandPlayback(
   const commandName = getDynamicSavedCommandName(message);
   if (!commandName) return false;
 
-  const savedCommand = await findSavedCommandForUser(db, registration.telegram_user_id, commandName);
+  const savedCommand = await findSavedCommandForTeam(db, commandName, registration.telegram_user_id);
   if (!savedCommand) {
     const firstToken = message.text?.trim().split(/\s+/, 1)[0] ?? "";
     if (hasBotMention(firstToken)) return false;

@@ -1,4 +1,5 @@
 import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { TEAM_SCHEDULE } from "./team-schedule.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -94,6 +95,30 @@ export async function findSavedCommandForUser(
     params(eq("owner_telegram_user_id", ownerTelegramUserId), eq("command_name", commandName), limit(1))
   );
   return rows[0] ?? null;
+}
+
+const TEAM_MEMBER_IDS: ReadonlyArray<string> = TEAM_SCHEDULE.map((member) => member.id);
+
+export async function findSavedCommandForTeam(
+  db: SupabaseRestClient,
+  commandName: string,
+  preferredOwnerTelegramUserId?: number
+): Promise<SavedCommand | null> {
+  const rows = await db.select<SavedCommand>(
+    "saved_commands",
+    params(
+      eq("command_name", commandName),
+      inList("owner_member_id", TEAM_MEMBER_IDS),
+      order("updated_at", false),
+      limit(50)
+    )
+  );
+  if (rows.length === 0) return null;
+  if (preferredOwnerTelegramUserId !== undefined) {
+    const ownRow = rows.find((row) => row.owner_telegram_user_id === preferredOwnerTelegramUserId);
+    if (ownRow) return ownRow;
+  }
+  return rows[0];
 }
 
 export async function getAppSetting(db: SupabaseRestClient, key: string): Promise<string | null> {
