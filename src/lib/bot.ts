@@ -149,6 +149,13 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     return;
   }
 
+  if (text.startsWith("/")) {
+    console.info(
+      `Ignoring unknown private command "${command}" from Telegram user ${user.id} in chat ${message.chat.id}. No frontend response will be sent.`
+    );
+    return;
+  }
+
   await sendMessage(message.chat.id, "Please use the buttons below.", { replyMarkup: dashboardKeyboard() });
 }
 
@@ -650,9 +657,9 @@ async function handleSavedCommandPlayback(
     const firstToken = message.text?.trim().split(/\s+/, 1)[0] ?? "";
     if (hasBotMention(firstToken)) return false;
 
-    await sendMessage(message.chat.id, `No saved command found for /${commandName}.`, {
-      replyToMessageId: message.message_id
-    });
+    console.info(
+      `Ignoring unknown group command /${commandName} from member ${registration.member_id} (Telegram user ${registration.telegram_user_id}) in chat ${message.chat.id}. No frontend response will be sent.`
+    );
     return true;
   }
 
