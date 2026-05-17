@@ -10,7 +10,7 @@ import {
   findRegistrationByMemberId,
   findRegistrationByUser,
   findProofOfWorkSubmission,
-  findSavedCommandForUser,
+  findSavedCommandForTeam,
   findSupportTicketById,
   findTimeLog,
   listRecentBotSupportTicketMessages,
@@ -146,6 +146,13 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   const state = await getConversationState(db, user.id);
   if (state) {
     await handleStatefulReply(db, message, state.state, state.payload);
+    return;
+  }
+
+  if (text.startsWith("/")) {
+    console.info(
+      `Ignoring unknown private command "${command}" from Telegram user ${user.id} in chat ${message.chat.id}. No frontend response will be sent.`
+    );
     return;
   }
 
@@ -645,14 +652,14 @@ async function handleSavedCommandPlayback(
   const commandName = getDynamicSavedCommandName(message);
   if (!commandName) return false;
 
-  const savedCommand = await findSavedCommandForUser(db, registration.telegram_user_id, commandName);
+  const savedCommand = await findSavedCommandForTeam(db, commandName, registration.telegram_user_id);
   if (!savedCommand) {
     const firstToken = message.text?.trim().split(/\s+/, 1)[0] ?? "";
     if (hasBotMention(firstToken)) return false;
 
-    await sendMessage(message.chat.id, `No saved command found for /${commandName}.`, {
-      replyToMessageId: message.message_id
-    });
+    console.info(
+      `Ignoring unknown group command /${commandName} from member ${registration.member_id} (Telegram user ${registration.telegram_user_id}) in chat ${message.chat.id}. No frontend response will be sent.`
+    );
     return true;
   }
 
