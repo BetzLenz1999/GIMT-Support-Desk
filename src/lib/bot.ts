@@ -348,12 +348,15 @@ const RESERVED_SAVED_COMMAND_NAMES = new Set([
   "help",
   "id",
   "menu",
+  "personal",
   "save",
   "start"
 ]);
 
+const SAVE_COMMAND_ALIASES = new Set(["/save", "/personal"]);
+
 function isSaveCommand(message: TelegramMessage): boolean {
-  return getCommand(message.text?.trim() ?? "") === "/save";
+  return SAVE_COMMAND_ALIASES.has(getCommand(message.text?.trim() ?? ""));
 }
 
 function parseSavedCommandName(rawName: string | undefined): string | null {
