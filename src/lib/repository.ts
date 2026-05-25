@@ -1,4 +1,4 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -151,6 +151,20 @@ export async function getOrCreateTimeLog(
   });
 
   return single(rows);
+}
+
+export async function findApprovedSwapsForMember(
+  db: SupabaseRestClient,
+  memberId: string,
+  workDateUtcCandidates: ReadonlyArray<string>
+): Promise<ShiftRequest[]> {
+  if (workDateUtcCandidates.length === 0) return [];
+  const sp = new URLSearchParams();
+  sp.append("select", "*");
+  sp.append("status", "eq.accepted");
+  sp.append("work_date_utc", `in.(${workDateUtcCandidates.join(",")})`);
+  sp.append("or", `(requester_member_id.eq.${memberId},target_member_id.eq.${memberId})`);
+  return db.select<ShiftRequest>("shift_requests", sp);
 }
 
 export async function findTimeLog(db: SupabaseRestClient, memberId: string, workDateUtc: string): Promise<TimeLog | null> {

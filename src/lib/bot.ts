@@ -7,6 +7,7 @@ import {
   createSupportTicket,
   findActiveSupportTicketByMessageReference,
   findActiveSupportTicketForUser,
+  findApprovedSwapsForMember,
   findRegistrationByMemberId,
   findRegistrationByUser,
   findProofOfWorkSubmission,
@@ -425,8 +426,9 @@ async function postExpiringGroupAck(
   });
 }
 
-function buildTimeInAckText(mention: string, scheduled: Date, actual: Date, timezone: string, lateMinutes: number): string {
-  return `🟢 Time In: ${mention}\nScheduled: ${formatUtc(scheduled)} UTC\nActual: ${formatUtc(actual)} UTC\nLocal: ${formatLocal(actual, timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`;
+function buildTimeInAckText(mention: string, scheduled: Date, actual: Date, timezone: string, lateMinutes: number, swap: SwapInfo | null = null): string {
+  const coverLine = swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : "";
+  return `🟢 Time In: ${mention}${coverLine}\nScheduled: ${formatUtc(scheduled)} UTC\nActual: ${formatUtc(actual)} UTC\nLocal: ${formatLocal(actual, timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`;
 }
 
 function buildTimeOutAckText(
@@ -435,9 +437,24 @@ function buildTimeOutAckText(
   actualOut: Date,
   workedMinutes: number,
   earlyOutMinutes: number,
-  overtimeMinutes: number
+  overtimeMinutes: number,
+  swap: SwapInfo | null = null
 ): string {
-  return `🔴 Time Out: ${mention}\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nActual Out: ${formatUtc(actualOut)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`;
+  const coverLine = swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : "";
+  return `🔴 Time Out: ${mention}${coverLine}\nScheduled Out: ${formatUtc(scheduledOut)} UTC\nActual Out: ${formatUtc(actualOut)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`;
+}
+
+function buildSwapMetadata(swap: SwapInfo | null): Record<string, unknown> {
+  if (!swap) return {};
+  return {
+    swap: {
+      requestId: swap.requestId,
+      role: swap.role,
+      counterpartMemberId: swap.counterpartMemberId,
+      counterpartMemberName: swap.counterpartMemberName,
+      workDateUtc: swap.workDateUtc
+    }
+  };
 }
 
 function buildProofOfWorkAckText(mention: string, status: string, proofType: string): string {
@@ -1212,7 +1229,7 @@ async function isRegistrationTimedIn(
   registration: Registration,
   member: TeamMember
 ): Promise<boolean> {
-  const window = getRelevantShiftWindow(member, new Date());
+  const { window } = await getEffectiveShiftContext(db, member, new Date());
   const log = await findTimeLog(db, registration.member_id, window.workDateUtc);
   return Boolean(log?.actual_in_utc && !log.actual_out_utc);
 }
@@ -1225,6 +1242,72 @@ function isMemberScheduledAt(member: TeamMember, at: Date): boolean {
 
 function findScheduledMemberAt(at: Date): TeamMember | null {
   return TEAM_SCHEDULE.find((member) => isMemberScheduledAt(member, at)) ?? null;
+}
+
+const SWAP_POST_SHIFT_BUFFER_MS = 2 * 60 * 60 * 1000;
+const SWAP_PRE_SHIFT_LOOKAHEAD_MS = 24 * 60 * 60 * 1000;
+
+type ShiftWindow = ReturnType<typeof getShiftWindowForDate>;
+
+type SwapInfo = {
+  requestId: string;
+  workDateUtc: string;
+  role: "requester" | "target";
+  counterpartMemberId: string;
+  counterpartMemberName: string;
+};
+
+type ShiftContext = {
+  window: ShiftWindow;
+  swap: SwapInfo | null;
+};
+
+function buildSwapInfo(swap: { id: string; work_date_utc: string; requester_member_id: string; requester_member_name: string; target_member_id: string; target_member_name: string }, memberId: string): SwapInfo {
+  const role: "requester" | "target" = swap.requester_member_id === memberId ? "requester" : "target";
+  const counterpartMemberId = role === "requester" ? swap.target_member_id : swap.requester_member_id;
+  const counterpartMemberName = role === "requester" ? swap.target_member_name : swap.requester_member_name;
+  return {
+    requestId: swap.id,
+    workDateUtc: swap.work_date_utc,
+    role,
+    counterpartMemberId,
+    counterpartMemberName
+  };
+}
+
+async function getEffectiveShiftContext(
+  db: SupabaseRestClient,
+  member: TeamMember,
+  now: Date = new Date()
+): Promise<ShiftContext> {
+  const today = utcDateKey(now);
+  const yesterday = utcDateKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const tomorrow = utcDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const swaps = await findApprovedSwapsForMember(db, member.id, [yesterday, today, tomorrow]);
+
+  type Candidate = { swap: typeof swaps[number]; window: ShiftWindow; distance: number };
+  const candidates: Candidate[] = [];
+  for (const swap of swaps) {
+    const info = buildSwapInfo(swap, member.id);
+    const counterpart = getTeamMember(info.counterpartMemberId);
+    if (!counterpart) continue;
+    const window = getShiftWindowForDate(counterpart, swap.work_date_utc);
+    if (now.getTime() > window.end.getTime() + SWAP_POST_SHIFT_BUFFER_MS) continue;
+    if (now.getTime() < window.start.getTime() - SWAP_PRE_SHIFT_LOOKAHEAD_MS) continue;
+    const distance = Math.abs(now.getTime() - window.start.getTime());
+    candidates.push({ swap, window, distance });
+  }
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => a.distance - b.distance);
+    const best = candidates[0];
+    return {
+      window: best.window,
+      swap: buildSwapInfo(best.swap, member.id)
+    };
+  }
+
+  return { window: getRelevantShiftWindow(member, now), swap: null };
 }
 
 function isTicketClosed(ticket: SupportTicket): boolean {
@@ -1475,6 +1558,7 @@ async function handleStatefulReply(
     }
 
     const window = proofEligibility.window;
+    const swap = proofEligibility.swap;
     const status = now.getTime() > window.end.getTime() ? "late" : "submitted";
     const proofType = getProofType(reason);
 
@@ -1498,8 +1582,8 @@ async function handleStatefulReply(
       member_name: registration.member_name,
       telegram_user_id: user.id,
       action: "PROOF_OF_WORK_SUBMITTED",
-      message: `${registration.member_name} submitted proof of work with status: ${status}.`,
-      metadata: { proofType, status, workDateUtc: window.workDateUtc }
+      message: `${registration.member_name} submitted proof of work with status: ${status}.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`,
+      metadata: { proofType, status, workDateUtc: window.workDateUtc, ...buildSwapMetadata(swap) }
     });
 
     await sendMessage(
@@ -1636,7 +1720,7 @@ async function handleStatefulReply(
 
 
 type ProofSubmissionEligibility =
-  | { allowed: true; window: ReturnType<typeof getProofSubmissionShiftWindow> }
+  | { allowed: true; window: ReturnType<typeof getProofSubmissionShiftWindow>; swap: SwapInfo | null }
   | { allowed: false; message: string };
 
 async function getProofSubmissionEligibility(
@@ -1649,20 +1733,23 @@ async function getProofSubmissionEligibility(
     return { allowed: false, message: "Your team profile was not found. Please contact the admin." };
   }
 
-  const window = getProofSubmissionShiftWindow(member, now);
+  const effective = await getEffectiveShiftContext(db, member, now);
+  const window = effective.swap
+    ? effective.window
+    : getProofSubmissionShiftWindow(member, now);
   const log = await findTimeLog(db, member.id, window.workDateUtc);
 
   if (now.getTime() < window.start.getTime()) {
     return {
       allowed: false,
-      message: `📎 Proof of Work is not open yet. Please Time In first when your shift starts.\n\nShift Start: ${formatUtc(window.start)} UTC\nScheduled Out: ${formatUtc(window.end)} UTC`
+      message: `📎 Proof of Work is not open yet. Please Time In first when your shift starts.${effective.swap ? `\nCovering: ${effective.swap.counterpartMemberName}'s shift (approved swap)` : ""}\n\nShift Start: ${formatUtc(window.start)} UTC\nScheduled Out: ${formatUtc(window.end)} UTC`
     };
   }
 
   if (!log?.actual_in_utc) {
     return {
       allowed: false,
-      message: `📎 Proof of Work is only available after you Time In for your active shift. Please Time In first.\n\nScheduled Out: ${formatUtc(window.end)} UTC`
+      message: `📎 Proof of Work is only available after you Time In for your active shift. Please Time In first.${effective.swap ? `\nCovering: ${effective.swap.counterpartMemberName}'s shift (approved swap)` : ""}\n\nScheduled Out: ${formatUtc(window.end)} UTC`
     };
   }
 
@@ -1674,7 +1761,7 @@ async function getProofSubmissionEligibility(
     };
   }
 
-  return { allowed: true, window };
+  return { allowed: true, window, swap: effective.swap };
 }
 
 function getProofSubmissionShiftWindow(member: NonNullable<ReturnType<typeof getTeamMember>>, now: Date) {
@@ -1710,7 +1797,8 @@ async function handleTimeIn(db: SupabaseRestClient, chatId: number, messageId: n
   if (!registration || !member) return;
 
   const now = new Date();
-  const window = getRelevantShiftWindow(member, now);
+  const { window, swap } = await getEffectiveShiftContext(db, member, now);
+  const swapLine = swap ? `\n🔁 Covering ${swap.counterpartMemberName}'s shift (approved swap)` : "";
 
   const existing = await findTimeLog(db, registration.member_id, window.workDateUtc);
 
@@ -1725,13 +1813,13 @@ async function handleTimeIn(db: SupabaseRestClient, chatId: number, messageId: n
     await editMessageText(
       chatId,
       messageId,
-      `⚠️ Your shift hasn't started yet.\n\n👤 ${registration.member_name}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\n\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
+      `⚠️ Your shift hasn't started yet.\n\n👤 ${registration.member_name}${swapLine}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\n\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
       { replyMarkup: dashboardKeyboard() }
     );
     const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
     await sendTeamGroupMessage(`⚠️ Early Time In Blocked
 
-${mention} tried to Time In before the allowed window.
+${mention} tried to Time In before the allowed window.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}
 Scheduled start: ${formatUtc(window.start)} UTC
 Local: ${formatLocal(window.start, member.timezone)}
 Allowed from: ${formatUtc(new Date(window.start.getTime() - EARLY_TIME_IN_GRACE_MINUTES * 60_000))} UTC`, { parseMode: "HTML" });
@@ -1749,8 +1837,8 @@ Allowed from: ${formatUtc(new Date(window.start.getTime() - EARLY_TIME_IN_GRACE_
   });
 
   const message = lateMinutes > 0
-    ? `${registration.member_name} timed in late by ${formatDuration(lateMinutes)}.`
-    : `${registration.member_name} timed in on time.`;
+    ? `${registration.member_name} timed in late by ${formatDuration(lateMinutes)}.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`
+    : `${registration.member_name} timed in on time.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`;
 
   await createActivity(db, {
     member_id: registration.member_id,
@@ -1758,13 +1846,13 @@ Allowed from: ${formatUtc(new Date(window.start.getTime() - EARLY_TIME_IN_GRACE_
     telegram_user_id: userId,
     action: "TIME_IN",
     message,
-    metadata: { lateMinutes }
+    metadata: { lateMinutes, ...buildSwapMetadata(swap) }
   });
 
   await editMessageText(
     chatId,
     messageId,
-    `✅ Time In recorded.\n\n👤 ${registration.member_name}\nScheduled: ${formatUtc(window.start)} UTC\nActual: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`,
+    `✅ Time In recorded.\n\n👤 ${registration.member_name}${swapLine}\nScheduled: ${formatUtc(window.start)} UTC\nActual: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`,
     { replyMarkup: dashboardKeyboard() }
   );
 
@@ -1776,7 +1864,7 @@ Allowed from: ${formatUtc(new Date(window.start.getTime() - EARLY_TIME_IN_GRACE_
     registration.member_id,
     window.workDateUtc,
     "time_in_ack",
-    buildTimeInAckText(mention, window.start, now, member.timezone, lateMinutes)
+    buildTimeInAckText(mention, window.start, now, member.timezone, lateMinutes, swap)
   );
 }
 
@@ -1786,7 +1874,8 @@ async function handleTimeOut(db: SupabaseRestClient, chatId: number, messageId: 
   if (!registration || !member) return;
 
   const now = new Date();
-  const window = getRelevantShiftWindow(member, now);
+  const { window, swap } = await getEffectiveShiftContext(db, member, now);
+  const swapLine = swap ? `\n🔁 Covering ${swap.counterpartMemberName}'s shift (approved swap)` : "";
   const log = await findTimeLog(db, registration.member_id, window.workDateUtc);
 
   if (!log?.actual_in_utc) {
@@ -1821,14 +1910,14 @@ async function handleTimeOut(db: SupabaseRestClient, chatId: number, messageId: 
     member_name: registration.member_name,
     telegram_user_id: userId,
     action: "TIME_OUT",
-    message: `${registration.member_name} timed out. Worked ${formatDuration(workedMinutes)}.`,
-    metadata: { earlyOutMinutes, overtimeMinutes, workedMinutes }
+    message: `${registration.member_name} timed out. Worked ${formatDuration(workedMinutes)}.${swap ? ` (covered ${swap.counterpartMemberName})` : ""}`,
+    metadata: { earlyOutMinutes, overtimeMinutes, workedMinutes, ...buildSwapMetadata(swap) }
   });
 
   await editMessageText(
     chatId,
     messageId,
-    `🔴 Time Out recorded.\n\n👤 ${registration.member_name}\nScheduled Out: ${formatUtc(window.end)} UTC\nActual Out: ${formatUtc(now)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`,
+    `🔴 Time Out recorded.\n\n👤 ${registration.member_name}${swapLine}\nScheduled Out: ${formatUtc(window.end)} UTC\nActual Out: ${formatUtc(now)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`,
     { replyMarkup: dashboardKeyboard() }
   );
 
@@ -1840,7 +1929,7 @@ async function handleTimeOut(db: SupabaseRestClient, chatId: number, messageId: 
     registration.member_id,
     window.workDateUtc,
     "time_out_ack",
-    buildTimeOutAckText(mention, window.end, now, workedMinutes, earlyOutMinutes, overtimeMinutes)
+    buildTimeOutAckText(mention, window.end, now, workedMinutes, earlyOutMinutes, overtimeMinutes, swap)
   );
 }
 
@@ -1852,7 +1941,8 @@ async function handleGroupTimeIn(
   member: TeamMember
 ): Promise<void> {
   const now = new Date();
-  const window = getRelevantShiftWindow(member, now);
+  const { window, swap } = await getEffectiveShiftContext(db, member, now);
+  const swapLine = swap ? `\n🔁 Covering ${swap.counterpartMemberName}'s shift (approved swap)` : "";
   const existing = await findTimeLog(db, registration.member_id, window.workDateUtc);
   const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
 
@@ -1864,7 +1954,7 @@ async function handleGroupTimeIn(
   if (isTooEarlyToTimeIn(window.start, now)) {
     await sendMessage(
       chatId,
-      `⚠️ ${mention}, your shift hasn't started yet.\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
+      `⚠️ ${mention}, your shift hasn't started yet.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
       { parseMode: "HTML" }
     );
     return;
@@ -1881,8 +1971,8 @@ async function handleGroupTimeIn(
   });
 
   const activityMessage = lateMinutes > 0
-    ? `${registration.member_name} timed in late by ${formatDuration(lateMinutes)}.`
-    : `${registration.member_name} timed in on time.`;
+    ? `${registration.member_name} timed in late by ${formatDuration(lateMinutes)}.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`
+    : `${registration.member_name} timed in on time.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`;
 
   await createActivity(db, {
     member_id: registration.member_id,
@@ -1890,7 +1980,7 @@ async function handleGroupTimeIn(
     telegram_user_id: registration.telegram_user_id,
     action: "TIME_IN",
     message: activityMessage,
-    metadata: { lateMinutes, source: "group" }
+    metadata: { lateMinutes, source: "group", ...buildSwapMetadata(swap) }
   });
 
   await clearGroupActionMessages(db, registration.member_id, window.workDateUtc, "time_in");
@@ -1901,13 +1991,13 @@ async function handleGroupTimeIn(
     registration.member_id,
     window.workDateUtc,
     "time_in_ack",
-    buildTimeInAckText(mention, window.start, now, member.timezone, lateMinutes)
+    buildTimeInAckText(mention, window.start, now, member.timezone, lateMinutes, swap)
   );
 
   await sendPersonalDmAck(
     db,
     registration,
-    `✅ Time In recorded.\n\n👤 ${registration.member_name}\nScheduled: ${formatUtc(window.start)} UTC\nActual: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`
+    `✅ Time In recorded.\n\n👤 ${registration.member_name}${swapLine}\nScheduled: ${formatUtc(window.start)} UTC\nActual: ${formatUtc(now)} UTC\nLocal: ${formatLocal(now, member.timezone)}\nStatus: ${lateMinutes > 0 ? `Late by ${formatDuration(lateMinutes)}` : "On time"}`
   );
 }
 
@@ -1919,7 +2009,8 @@ async function handleGroupTimeOut(
   member: TeamMember
 ): Promise<void> {
   const now = new Date();
-  const window = getRelevantShiftWindow(member, now);
+  const { window, swap } = await getEffectiveShiftContext(db, member, now);
+  const swapLine = swap ? `\n🔁 Covering ${swap.counterpartMemberName}'s shift (approved swap)` : "";
   const log = await findTimeLog(db, registration.member_id, window.workDateUtc);
   const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
 
@@ -1951,8 +2042,8 @@ async function handleGroupTimeOut(
     member_name: registration.member_name,
     telegram_user_id: registration.telegram_user_id,
     action: "TIME_OUT",
-    message: `${registration.member_name} timed out. Worked ${formatDuration(workedMinutes)}.`,
-    metadata: { earlyOutMinutes, overtimeMinutes, workedMinutes, source: "group" }
+    message: `${registration.member_name} timed out. Worked ${formatDuration(workedMinutes)}.${swap ? ` (covered ${swap.counterpartMemberName})` : ""}`,
+    metadata: { earlyOutMinutes, overtimeMinutes, workedMinutes, source: "group", ...buildSwapMetadata(swap) }
   });
 
   await clearGroupActionMessages(db, registration.member_id, window.workDateUtc, "time_out");
@@ -1963,13 +2054,13 @@ async function handleGroupTimeOut(
     registration.member_id,
     window.workDateUtc,
     "time_out_ack",
-    buildTimeOutAckText(mention, window.end, now, workedMinutes, earlyOutMinutes, overtimeMinutes)
+    buildTimeOutAckText(mention, window.end, now, workedMinutes, earlyOutMinutes, overtimeMinutes, swap)
   );
 
   await sendPersonalDmAck(
     db,
     registration,
-    `🔴 Time Out recorded.\n\n👤 ${registration.member_name}\nScheduled Out: ${formatUtc(window.end)} UTC\nActual Out: ${formatUtc(now)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`
+    `🔴 Time Out recorded.\n\n👤 ${registration.member_name}${swapLine}\nScheduled Out: ${formatUtc(window.end)} UTC\nActual Out: ${formatUtc(now)} UTC\nWorked: ${formatDuration(workedMinutes)}\n${earlyOutMinutes > 0 ? `Early By: ${formatDuration(earlyOutMinutes)}` : `Overtime: ${formatDuration(overtimeMinutes)}`}`
   );
 }
 
@@ -1993,9 +2084,12 @@ async function handleSwapResponse(db: SupabaseRestClient, chatId: number, messag
   const [, action, requestId] = data.split(":");
   const status = action === "accept" ? "accepted" : "rejected";
   const [request] = await db.update<{
+    id: string;
+    requester_member_id: string;
+    requester_member_name: string;
     target_member_id: string;
     target_member_name: string;
-    requester_member_name: string;
+    work_date_utc: string;
   }>("shift_requests", { status, responded_at: new Date().toISOString() }, new URLSearchParams([["id", `eq.${requestId}`]]));
   if (!request) throw new Error("Shift request not found");
 
@@ -2005,16 +2099,85 @@ async function handleSwapResponse(db: SupabaseRestClient, chatId: number, messag
     telegram_user_id: user.id,
     action: `SHIFT_SWAP_${status.toUpperCase()}`,
     message: `${request.target_member_name} ${status} ${request.requester_member_name}'s shift swap request.`,
-    metadata: { requestId }
+    metadata: {
+      requestId,
+      workDateUtc: request.work_date_utc,
+      requesterMemberId: request.requester_member_id,
+      targetMemberId: request.target_member_id
+    }
   });
 
-  await editMessageText(chatId, messageId, `Shift swap request ${status}.`, { replyMarkup: dashboardKeyboard() });
+  if (status === "accepted") {
+    const requesterMember = getTeamMember(request.requester_member_id);
+    const targetMember = getTeamMember(request.target_member_id);
+    const requesterWindow = requesterMember ? getShiftWindowForDate(requesterMember, request.work_date_utc) : null;
+    const targetWindow = targetMember ? getShiftWindowForDate(targetMember, request.work_date_utc) : null;
+    const detailLines: string[] = [];
+    if (requesterWindow) {
+      detailLines.push(`• ${request.target_member_name} now covers ${request.requester_member_name}'s shift: ${formatUtc(requesterWindow.start)}–${formatUtc(requesterWindow.end)} UTC`);
+    }
+    if (targetWindow) {
+      detailLines.push(`• ${request.requester_member_name} now covers ${request.target_member_name}'s shift: ${formatUtc(targetWindow.start)}–${formatUtc(targetWindow.end)} UTC`);
+    }
+    detailLines.push(`• Auto-reverts the next day. Use Time In on the dashboard during the effective hours.`);
+    await editMessageText(
+      chatId,
+      messageId,
+      `✅ Shift swap accepted for ${request.work_date_utc}.\n\n${detailLines.join("\n")}`,
+      { replyMarkup: dashboardKeyboard() }
+    );
+  } else {
+    await editMessageText(chatId, messageId, `Shift swap request ${status}.`, { replyMarkup: dashboardKeyboard() });
+  }
 
   const responderMention = `<a href="tg://user?id=${user.id}">${escapeHtmlForMention(request.target_member_name)}</a>`;
-  await sendTeamGroupMessage(
-    `🔁 Shift Swap ${status === "accepted" ? "Accepted" : "Rejected"}\n${responderMention} ${status} ${escapeHtmlForMention(request.requester_member_name)}'s shift swap request.`,
-    { parseMode: "HTML" }
-  );
+  if (status === "accepted") {
+    const requesterMember = getTeamMember(request.requester_member_id);
+    const targetMember = getTeamMember(request.target_member_id);
+    const requesterWindow = requesterMember ? getShiftWindowForDate(requesterMember, request.work_date_utc) : null;
+    const targetWindow = targetMember ? getShiftWindowForDate(targetMember, request.work_date_utc) : null;
+    const detailLines: string[] = [];
+    if (requesterWindow) {
+      detailLines.push(`${escapeHtmlForMention(request.target_member_name)} covers ${escapeHtmlForMention(request.requester_member_name)}'s shift: ${formatUtc(requesterWindow.start)}–${formatUtc(requesterWindow.end)} UTC`);
+    }
+    if (targetWindow) {
+      detailLines.push(`${escapeHtmlForMention(request.requester_member_name)} covers ${escapeHtmlForMention(request.target_member_name)}'s shift: ${formatUtc(targetWindow.start)}–${formatUtc(targetWindow.end)} UTC`);
+    }
+    await sendTeamGroupMessage(
+      `🔁 Shift Swap Accepted for ${request.work_date_utc}\n${responderMention} accepted ${escapeHtmlForMention(request.requester_member_name)}'s request.\n${detailLines.join("\n")}\n(Auto-reverts the next day.)`,
+      { parseMode: "HTML" }
+    );
+  } else {
+    await sendTeamGroupMessage(
+      `🔁 Shift Swap Rejected\n${responderMention} rejected ${escapeHtmlForMention(request.requester_member_name)}'s shift swap request.`,
+      { parseMode: "HTML" }
+    );
+  }
+
+  if (status === "accepted") {
+    try {
+      const requesterRegistration = await findRegistrationByMemberId(db, request.requester_member_id);
+      if (requesterRegistration) {
+        const requesterMember = getTeamMember(request.requester_member_id);
+        const targetMember = getTeamMember(request.target_member_id);
+        const requesterWindow = requesterMember ? getShiftWindowForDate(requesterMember, request.work_date_utc) : null;
+        const targetWindow = targetMember ? getShiftWindowForDate(targetMember, request.work_date_utc) : null;
+        const lines: string[] = [
+          `✅ ${request.target_member_name} accepted your shift swap for ${request.work_date_utc}.`
+        ];
+        if (requesterWindow) {
+          lines.push(`• ${request.target_member_name} now covers your shift: ${formatUtc(requesterWindow.start)}–${formatUtc(requesterWindow.end)} UTC.`);
+        }
+        if (targetWindow) {
+          lines.push(`• You now cover ${request.target_member_name}'s shift: ${formatUtc(targetWindow.start)}–${formatUtc(targetWindow.end)} UTC.`);
+        }
+        lines.push(`• Auto-reverts the next day.`);
+        await sendPersonalDmAck(db, requesterRegistration, lines.join("\n"));
+      }
+    } catch (error) {
+      console.warn(`Could not DM requester about accepted swap: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 async function buildDashboardText(db: SupabaseRestClient, memberId: string, userId: number): Promise<string> {
@@ -2022,11 +2185,30 @@ async function buildDashboardText(db: SupabaseRestClient, memberId: string, user
   if (!member) return "Unknown member.";
 
   const now = new Date();
-  const window = getRelevantShiftWindow(member, now);
+  const { window, swap } = await getEffectiveShiftContext(db, member, now);
   const log = await findTimeLog(db, member.id, window.workDateUtc);
   const status = log ? formatLogStatus(log) : "Not yet timed in";
 
-  return `👤 ${member.name}\n🌍 UTC Now: ${formatUtc(now)} UTC\n🏠 Local Now: ${formatLocal(now, member.timezone)}\n\n🕒 Your Shift:\n${member.shiftStartUtc}–${member.shiftEndUtc} UTC\n${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}\n\n📌 Today:\n${status}\n\n⏳ Timer:\n${getShiftProgress(member, now)}\n\nUse the buttons below.`;
+  const baseShiftLine = `${member.shiftStartUtc}–${member.shiftEndUtc} UTC`;
+  const swapHeader = swap
+    ? `\n\n🔁 Active Swap (${swap.workDateUtc}):\nYou're covering ${swap.counterpartMemberName}'s shift today.\nEffective: ${formatUtc(window.start)}–${formatUtc(window.end)} UTC`
+    : "";
+  const effectiveShiftLine = swap
+    ? `Original: ${baseShiftLine}\nEffective today: ${formatUtc(window.start)}–${formatUtc(window.end)} UTC\n${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`
+    : `${baseShiftLine}\n${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`;
+  const progress = swap ? getShiftProgressForWindow(window, now) : getShiftProgress(member, now);
+
+  return `👤 ${member.name}\n🌍 UTC Now: ${formatUtc(now)} UTC\n🏠 Local Now: ${formatLocal(now, member.timezone)}${swapHeader}\n\n🕒 Your Shift:\n${effectiveShiftLine}\n\n📌 Today:\n${status}\n\n⏳ Timer:\n${progress}\n\nUse the buttons below.`;
+}
+
+function getShiftProgressForWindow(window: ShiftWindow, now: Date): string {
+  if (now < window.start) {
+    return `Starts in ${formatDuration(Math.max(0, Math.floor((window.start.getTime() - now.getTime()) / 60000)))}`;
+  }
+  if (now <= window.end) {
+    return `Shift active — ${formatDuration(Math.max(0, Math.floor((window.end.getTime() - now.getTime()) / 60000)))} remaining`;
+  }
+  return `Shift ended ${formatDuration(Math.max(0, Math.floor((now.getTime() - window.end.getTime()) / 60000)))} ago`;
 }
 
 function formatLogStatus(log: { actual_in_utc: string | null; actual_out_utc: string | null; status: string; late_minutes: number }) {
