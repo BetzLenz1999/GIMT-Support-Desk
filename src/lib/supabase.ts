@@ -84,6 +84,19 @@ export type ProofOfWorkSubmission = {
   created_at: string;
 };
 
+export type ShiftRequest = {
+  id: string;
+  requester_member_id: string;
+  requester_member_name: string;
+  target_member_id: string;
+  target_member_name: string;
+  work_date_utc: string;
+  reason: string;
+  status: "pending" | "accepted" | "rejected" | string;
+  created_at: string;
+  responded_at: string | null;
+};
+
 export type GroupMessageStat = {
   id: string;
   member_id: string;
