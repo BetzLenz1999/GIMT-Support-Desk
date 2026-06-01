@@ -1,4 +1,4 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -264,6 +264,30 @@ export async function createProofOfWorkSubmission(
   payload: Omit<ProofOfWorkSubmission, "id" | "created_at">
 ): Promise<ProofOfWorkSubmission> {
   return single(await db.insert<ProofOfWorkSubmission>("proof_of_work_submissions", payload));
+}
+
+export async function findProofOfWorkSubmissionByMediaGroup(
+  db: SupabaseRestClient,
+  telegramUserId: number,
+  mediaGroupId: string
+): Promise<ProofOfWorkSubmission | null> {
+  const rows = await db.select<ProofOfWorkSubmission>(
+    "proof_of_work_submissions",
+    params(eq("telegram_user_id", telegramUserId), eq("source_media_group_id", mediaGroupId), order("submitted_at_utc", false), limit(1))
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateProofOfWorkSubmissionAttachments(
+  db: SupabaseRestClient,
+  submissionId: string,
+  attachments: SupportTicketAttachment[]
+): Promise<ProofOfWorkSubmission> {
+  return single(await db.update<ProofOfWorkSubmission>(
+    "proof_of_work_submissions",
+    { attachments },
+    params(eq("id", submissionId))
+  ));
 }
 
 export async function markProofOfWorkReminderSubmitted(

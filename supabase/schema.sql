@@ -143,9 +143,11 @@ create table if not exists public.proof_of_work_submissions (
   scheduled_out_utc timestamptz not null,
   submitted_at_utc timestamptz not null default now(),
   proof_content text not null check (length(btrim(proof_content)) > 0),
-  proof_type text not null default 'text' check (proof_type in ('link', 'text', 'mixed')),
+  proof_type text not null default 'text' check (proof_type in ('link', 'text', 'mixed', 'screenshot')),
   status text not null default 'submitted' check (status in ('submitted', 'late')),
   source_chat_id bigint,
+  source_media_group_id text,
+  attachments jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   unique(member_id, work_date_utc)
 );
@@ -341,5 +343,19 @@ insert into storage.buckets (id, name, public)
 values ('support-ticket-attachments', 'support-ticket-attachments', true)
 on conflict (id) do update set public = excluded.public;
 
+insert into storage.buckets (id, name, public)
+values ('proof-of-work-attachments', 'proof-of-work-attachments', true)
+on conflict (id) do update set public = excluded.public;
+
 alter table if exists public.support_ticket_messages
   add column if not exists attachments jsonb not null default '[]'::jsonb;
+
+alter table if exists public.proof_of_work_submissions
+  add column if not exists source_media_group_id text,
+  add column if not exists attachments jsonb not null default '[]'::jsonb;
+
+alter table if exists public.proof_of_work_submissions
+  drop constraint if exists proof_of_work_submissions_proof_type_check,
+  add constraint proof_of_work_submissions_proof_type_check check (proof_type in ('link', 'text', 'mixed', 'screenshot'));
+
+create index if not exists proof_of_work_submissions_media_group_idx on public.proof_of_work_submissions(telegram_user_id, source_media_group_id) where source_media_group_id is not null;

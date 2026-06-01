@@ -121,6 +121,55 @@ function escapeHtml(value) {
   }[ch]));
 }
 
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function linkifyProofContent(value) {
+  const text = String(value ?? "");
+  const urlPattern = /https?:\/\/[^\s<>()]+[^\s<>().,;:!?]/gi;
+  let html = "";
+  let lastIndex = 0;
+  for (const match of text.matchAll(urlPattern)) {
+    const urlText = match[0];
+    const index = match.index ?? 0;
+    html += escapeHtml(text.slice(lastIndex, index));
+    const safeUrl = safeExternalUrl(urlText);
+    html += safeUrl
+      ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline dark:text-blue-300 break-all">${escapeHtml(urlText)}</a>`
+      : escapeHtml(urlText);
+    lastIndex = index + urlText.length;
+  }
+  html += escapeHtml(text.slice(lastIndex));
+  return html;
+}
+
+function renderProofAttachments(row) {
+  const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && safeExternalUrl(attachment.url));
+  if (!photos.length) return "";
+
+  return `
+    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      ${photos.map((attachment, index) => {
+        const imageUrl = safeExternalUrl(attachment.url);
+        return `
+          <a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer" class="block rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900">
+            <img src="${escapeHtml(imageUrl)}" alt="Proof of work screenshot ${index + 1}" loading="lazy" class="max-h-72 w-full object-contain bg-slate-100 dark:bg-slate-950" />
+            <div class="px-2 py-1 text-[11px] text-blue-600 dark:text-blue-300">Open screenshot ${index + 1}</div>
+          </a>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function decodeHtmlEntities(value) {
   const textarea = document.createElement("textarea");
   textarea.innerHTML = String(value ?? "");
@@ -750,7 +799,8 @@ function renderProofCard(row) {
         </div>
         <div class="text-xs text-slate-500 dark:text-slate-400 mono">${escapeHtml(fmtTimeUtc(row.submitted_at_utc))}</div>
       </header>
-      <pre class="mt-2 text-sm whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100 font-sans">${escapeHtml(row.proof_content)}</pre>
+      <div class="mt-2 text-sm whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100">${linkifyProofContent(row.proof_content)}</div>
+      ${renderProofAttachments(row)}
     </article>
   `;
 }
