@@ -28,6 +28,7 @@ export type TelegramMessage = {
   caption?: string;
   date?: number;
   photo?: TelegramPhotoSize[];
+  media_group_id?: string;
   new_chat_members?: TelegramUser[];
   reply_to_message?: TelegramMessage;
 };

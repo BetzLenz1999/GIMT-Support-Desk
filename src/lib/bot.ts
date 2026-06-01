@@ -11,6 +11,7 @@ import {
   findRegistrationByMemberId,
   findRegistrationByUser,
   findProofOfWorkSubmission,
+  findProofOfWorkSubmissionByMediaGroup,
   findSavedCommandForTeam,
   findSupportTicketById,
   findTimeLog,
@@ -21,6 +22,7 @@ import {
   incrementGroupMessageCount,
   listRecentActivities,
   markProofOfWorkReminderSubmitted,
+  updateProofOfWorkSubmissionAttachments,
   recordGroupActionMessage,
   recordSupportTicketEvent,
   recordSupportTicketMessage,
@@ -147,6 +149,10 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   const state = await getConversationState(db, user.id);
   if (state) {
     await handleStatefulReply(db, message, state.state, state.payload);
+    return;
+  }
+
+  if (await appendProofOfWorkMediaGroupAttachment(db, message, user)) {
     return;
   }
 
@@ -487,6 +493,7 @@ function ticketLabel(ticket: Pick<SupportTicket, "ticket_code" | "id">): string 
 }
 
 const SUPPORT_TICKET_ATTACHMENT_BUCKET = "support-ticket-attachments";
+const PROOF_OF_WORK_ATTACHMENT_BUCKET = "proof-of-work-attachments";
 
 function supportMessageText(message: TelegramMessage): string {
   const text = message.text?.trim() || message.caption?.trim() || "";
@@ -496,10 +503,12 @@ function supportMessageText(message: TelegramMessage): string {
   return text || "[non-text message]";
 }
 
-async function saveSupportTicketAttachments(
+async function saveTelegramPhotoAttachments(
   db: SupabaseRestClient,
-  ticketId: string,
-  message: TelegramMessage
+  bucket: string,
+  objectPathPrefix: string,
+  message: TelegramMessage,
+  warningContext: string
 ): Promise<SupportTicketAttachment[]> {
   if (!message.photo?.length) return [];
 
@@ -516,16 +525,16 @@ async function saveSupportTicketAttachments(
 
     const downloaded = await downloadFile(telegramFile.file_path);
     const extension = fileExtensionFromPath(telegramFile.file_path) || "jpg";
-    const objectPath = `${ticketId}/${message.message_id}/${largestPhoto.file_unique_id ?? largestPhoto.file_id}.${extension}`;
+    const objectPath = `${objectPathPrefix}/${message.message_id}/${largestPhoto.file_unique_id ?? largestPhoto.file_id}.${extension}`;
     const contentType = downloaded.contentType || contentTypeForExtension(extension);
 
-    await db.uploadObject(SUPPORT_TICKET_ATTACHMENT_BUCKET, objectPath, downloaded.bytes, contentType);
+    await db.uploadObject(bucket, objectPath, downloaded.bytes, contentType);
 
     return [{
       type: "photo",
-      bucket: SUPPORT_TICKET_ATTACHMENT_BUCKET,
+      bucket,
       path: objectPath,
-      url: db.getPublicObjectUrl(SUPPORT_TICKET_ATTACHMENT_BUCKET, objectPath),
+      url: db.getPublicObjectUrl(bucket, objectPath),
       telegram_file_id: largestPhoto.file_id,
       telegram_file_unique_id: largestPhoto.file_unique_id,
       file_size: telegramFile.file_size ?? largestPhoto.file_size,
@@ -535,10 +544,39 @@ async function saveSupportTicketAttachments(
     }];
   } catch (error) {
     console.warn(
-      `Failed to save support ticket attachment for ticket ${ticketId}, message ${message.message_id}: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to save Telegram photo attachment for ${warningContext}, message ${message.message_id}: ${error instanceof Error ? error.message : String(error)}`
     );
     return [];
   }
+}
+
+async function saveSupportTicketAttachments(
+  db: SupabaseRestClient,
+  ticketId: string,
+  message: TelegramMessage
+): Promise<SupportTicketAttachment[]> {
+  return saveTelegramPhotoAttachments(
+    db,
+    SUPPORT_TICKET_ATTACHMENT_BUCKET,
+    ticketId,
+    message,
+    `support ticket ${ticketId}`
+  );
+}
+
+async function saveProofOfWorkAttachments(
+  db: SupabaseRestClient,
+  memberId: string,
+  workDateUtc: string,
+  message: TelegramMessage
+): Promise<SupportTicketAttachment[]> {
+  return saveTelegramPhotoAttachments(
+    db,
+    PROOF_OF_WORK_ATTACHMENT_BUCKET,
+    `${memberId}/${workDateUtc}`,
+    message,
+    `proof of work ${memberId}/${workDateUtc}`
+  );
 }
 
 function fileExtensionFromPath(path: string): string | null {
@@ -1470,7 +1508,7 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
     await editMessageText(
       chatId,
       messageId,
-      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot links, or any valid non-empty text are accepted.\n\nScheduled Out: ${formatUtc(proofEligibility.window.end)} UTC. Proof submitted after this time will be marked Late.`,
+      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot uploads, screenshot links, or any valid non-empty text are accepted.\n\nScheduled Out: ${formatUtc(proofEligibility.window.end)} UTC. Proof submitted after this time will be marked Late.`,
       { replyMarkup: homeKeyboard() }
     );
     return;
@@ -1538,8 +1576,7 @@ async function handleStatefulReply(
   if (isGroupChat(message.chat)) return;
 
   const user = message.from;
-  const reason = message.text?.trim();
-  if (!user || !reason) return;
+  if (!user) return;
 
   const registration = await findRegistrationByUser(db, user.id);
   if (!registration) {
@@ -1547,20 +1584,28 @@ async function handleStatefulReply(
     return;
   }
 
-  await clearConversationState(db, user.id);
-
   if (state === "awaiting_proof_of_work") {
     const now = new Date();
     const proofEligibility = await getProofSubmissionEligibility(db, registration.member_id, now);
     if (!proofEligibility.allowed) {
+      await clearConversationState(db, user.id);
       await sendMessage(message.chat.id, proofEligibility.message, { replyMarkup: dashboardKeyboard() });
       return;
     }
 
     const window = proofEligibility.window;
+    const content = proofContentFromMessage(message);
+    if (!content) {
+      await sendMessage(message.chat.id, "Please send a link, note, or screenshot/photo as your proof of work.", { replyMarkup: homeKeyboard() });
+      return;
+    }
+
+    await clearConversationState(db, user.id);
+
     const swap = proofEligibility.swap;
     const status = now.getTime() > window.end.getTime() ? "late" : "submitted";
-    const proofType = getProofType(reason);
+    const attachments = await saveProofOfWorkAttachments(db, registration.member_id, window.workDateUtc, message);
+    const proofType = getProofType(content, attachments.length);
 
     await createProofOfWorkSubmission(db, {
       member_id: registration.member_id,
@@ -1569,10 +1614,12 @@ async function handleStatefulReply(
       work_date_utc: window.workDateUtc,
       scheduled_out_utc: window.end.toISOString(),
       submitted_at_utc: now.toISOString(),
-      proof_content: reason,
+      proof_content: content,
       proof_type: proofType,
       status,
-      source_chat_id: message.chat.id
+      source_chat_id: message.chat.id,
+      source_media_group_id: message.media_group_id ?? null,
+      attachments
     });
 
     await markProofOfWorkReminderSubmitted(db, registration.member_id, window.workDateUtc, now.toISOString());
@@ -1583,7 +1630,7 @@ async function handleStatefulReply(
       telegram_user_id: user.id,
       action: "PROOF_OF_WORK_SUBMITTED",
       message: `${registration.member_name} submitted proof of work with status: ${status}.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`,
-      metadata: { proofType, status, workDateUtc: window.workDateUtc, ...buildSwapMetadata(swap) }
+      metadata: { proofType, status, workDateUtc: window.workDateUtc, attachmentCount: attachments.length, ...buildSwapMetadata(swap) }
     });
 
     await sendMessage(
@@ -1604,6 +1651,11 @@ async function handleStatefulReply(
     );
     return;
   }
+
+  const reason = message.text?.trim();
+  if (!reason) return;
+
+  await clearConversationState(db, user.id);
 
   if (state === "awaiting_excuse_reason") {
     const excuseType = String(payload.excuseType ?? "other");
@@ -1782,10 +1834,48 @@ function getProofSubmissionShiftWindow(member: NonNullable<ReturnType<typeof get
   return activeOrRecentWindow ?? getRelevantShiftWindow(member, now);
 }
 
-function getProofType(content: string): string {
-  const hasUrl = /https?:\/\/\S+/i.test(content);
-  const textWithoutUrls = content.replace(/https?:\/\/\S+/gi, "").trim();
+function proofContentFromMessage(message: TelegramMessage): string {
+  const text = message.text?.trim() || message.caption?.trim() || "";
+  if (text) return text;
+  if (message.photo?.length) return "[screenshot attachment]";
+  return "";
+}
 
+async function appendProofOfWorkMediaGroupAttachment(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  user: TelegramUser
+): Promise<boolean> {
+  if (!message.media_group_id || !message.photo?.length || isGroupChat(message.chat)) return false;
+
+  const submission = await findProofOfWorkSubmissionByMediaGroup(db, user.id, message.media_group_id);
+  if (!submission) return false;
+
+  const attachments = await saveProofOfWorkAttachments(db, submission.member_id, submission.work_date_utc, message);
+  if (!attachments.length) return true;
+
+  const existingAttachments = Array.isArray(submission.attachments) ? submission.attachments : [];
+  const existingPaths = new Set(existingAttachments.map((attachment) => attachment.path));
+  const mergedAttachments = [
+    ...existingAttachments,
+    ...attachments.filter((attachment) => !existingPaths.has(attachment.path))
+  ];
+
+  await updateProofOfWorkSubmissionAttachments(db, submission.id, mergedAttachments);
+  await sendMessage(
+    message.chat.id,
+    `✅ Added screenshot ${mergedAttachments.length} to your proof of work for ${submission.work_date_utc}.`,
+    { replyMarkup: dashboardKeyboard() }
+  );
+  return true;
+}
+
+function getProofType(content: string, attachmentCount = 0): string {
+  const hasUrl = /https?:\/\/\S+/i.test(content);
+  const textWithoutUrls = content.replace(/https?:\/\/\S+/gi, "").replace(/\[screenshot attachment\]/gi, "").trim();
+
+  if (attachmentCount > 0 && (hasUrl || textWithoutUrls)) return "mixed";
+  if (attachmentCount > 0) return "screenshot";
   if (hasUrl && textWithoutUrls) return "mixed";
   if (hasUrl) return "link";
   return "text";

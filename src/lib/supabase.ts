@@ -81,6 +81,8 @@ export type ProofOfWorkSubmission = {
   proof_type: string;
   status: string;
   source_chat_id: number | null;
+  source_media_group_id: string | null;
+  attachments: SupportTicketAttachment[];
   created_at: string;
 };
 
