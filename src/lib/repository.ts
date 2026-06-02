@@ -295,6 +295,22 @@ export async function updateProofOfWorkSubmissionAttachments(
   ));
 }
 
+export type UpdateProofOfWorkSubmissionFields = Partial<
+  Pick<ProofOfWorkSubmission, "proof_content" | "proof_type" | "attachments" | "source_media_group_id">
+>;
+
+export async function updateProofOfWorkSubmission(
+  db: SupabaseRestClient,
+  submissionId: string,
+  fields: UpdateProofOfWorkSubmissionFields
+): Promise<ProofOfWorkSubmission> {
+  return single(await db.update<ProofOfWorkSubmission>(
+    "proof_of_work_submissions",
+    fields,
+    params(eq("id", submissionId))
+  ));
+}
+
 export async function markProofOfWorkReminderSubmitted(
   db: SupabaseRestClient,
   memberId: string,
