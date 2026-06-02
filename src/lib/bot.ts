@@ -1,4 +1,4 @@
-import type { GroupActionType, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
+import type { GroupActionType, ProofOfWorkSubmission, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
 import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
@@ -22,7 +22,7 @@ import {
   incrementGroupMessageCount,
   listRecentActivities,
   markProofOfWorkReminderSubmitted,
-  updateProofOfWorkSubmissionAttachments,
+  updateProofOfWorkSubmission,
   recordGroupActionMessage,
   recordSupportTicketEvent,
   recordSupportTicketMessage,
@@ -152,7 +152,7 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     return;
   }
 
-  if (await appendProofOfWorkMediaGroupAttachment(db, message, user)) {
+  if (await appendProofOfWorkMediaGroupAttachment(db, message, user, { waitForSubmission: true })) {
     return;
   }
 
@@ -1509,21 +1509,22 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
 
   if (data === "proof:start") {
     const proofEligibility = await getProofSubmissionEligibility(db, registration.member_id);
-    if (!proofEligibility.allowed) {
+    if (!proofEligibility.allowed && !proofEligibility.appendable) {
       await clearConversationState(db, callback.from.id);
       await editMessageText(chatId, messageId, proofEligibility.message, { replyMarkup: dashboardKeyboard() });
       return;
     }
 
+    const window = proofEligibility.window;
     await setConversationState(db, callback.from.id, "awaiting_proof_of_work", {
-      workDateUtc: proofEligibility.window.workDateUtc
+      workDateUtc: window.workDateUtc
     });
-    await editMessageText(
-      chatId,
-      messageId,
-      `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot uploads, screenshot links, or any valid non-empty text are accepted.\n\nScheduled Out: ${formatUtc(proofEligibility.window.end)} UTC. Proof submitted after this time will be marked Late.`,
-      { replyMarkup: homeKeyboard() }
-    );
+
+    const prompt = proofEligibility.allowed
+      ? `Please attach or type your proof of work now. Links, notes, user/respondent links, screenshot uploads, screenshot links, or any valid non-empty text are accepted. You can send several screenshots together as an album.\n\nScheduled Out: ${formatUtc(window.end)} UTC. Proof submitted after this time will be marked Late.`
+      : `You already submitted proof of work for ${window.workDateUtc}. Send more screenshots, links, or notes now and they will be added to that submission.`;
+
+    await editMessageText(chatId, messageId, prompt, { replyMarkup: homeKeyboard() });
     return;
   }
 
@@ -1600,7 +1601,7 @@ async function handleStatefulReply(
   if (state === "awaiting_proof_of_work") {
     const now = new Date();
     const proofEligibility = await getProofSubmissionEligibility(db, registration.member_id, now);
-    if (!proofEligibility.allowed) {
+    if (!proofEligibility.allowed && !proofEligibility.appendable) {
       await clearConversationState(db, user.id);
       await sendMessage(message.chat.id, proofEligibility.message, { replyMarkup: dashboardKeyboard() });
       return;
@@ -1615,25 +1616,43 @@ async function handleStatefulReply(
 
     await clearConversationState(db, user.id);
 
+    const attachments = await saveProofOfWorkAttachments(db, registration.member_id, window.workDateUtc, message);
+
+    // Already submitted for this work date: append the new screenshots/links/text
+    // to the existing submission instead of rejecting it.
+    if (!proofEligibility.allowed) {
+      await appendToExistingProofSubmission(db, proofEligibility.existing, content, attachments, message);
+      return;
+    }
+
     const swap = proofEligibility.swap;
     const status = now.getTime() > window.end.getTime() ? "late" : "submitted";
-    const attachments = await saveProofOfWorkAttachments(db, registration.member_id, window.workDateUtc, message);
     const proofType = getProofType(content, attachments.length);
 
-    await createProofOfWorkSubmission(db, {
-      member_id: registration.member_id,
-      member_name: registration.member_name,
-      telegram_user_id: user.id,
-      work_date_utc: window.workDateUtc,
-      scheduled_out_utc: window.end.toISOString(),
-      submitted_at_utc: now.toISOString(),
-      proof_content: content,
-      proof_type: proofType,
-      status,
-      source_chat_id: message.chat.id,
-      ...(message.media_group_id ? { source_media_group_id: message.media_group_id } : {}),
-      ...(attachments.length > 0 ? { attachments } : {})
-    });
+    try {
+      await createProofOfWorkSubmission(db, {
+        member_id: registration.member_id,
+        member_name: registration.member_name,
+        telegram_user_id: user.id,
+        work_date_utc: window.workDateUtc,
+        scheduled_out_utc: window.end.toISOString(),
+        submitted_at_utc: now.toISOString(),
+        proof_content: content,
+        proof_type: proofType,
+        status,
+        source_chat_id: message.chat.id,
+        ...(message.media_group_id ? { source_media_group_id: message.media_group_id } : {}),
+        ...(attachments.length > 0 ? { attachments } : {})
+      });
+    } catch (error) {
+      // A concurrent album message (or a quick repeat) may have already created
+      // today's submission. Merge into it rather than surfacing a generic error.
+      if (!isUniqueViolationError(error)) throw error;
+      const existing = await findProofOfWorkSubmission(db, registration.member_id, window.workDateUtc);
+      if (!existing) throw error;
+      await appendToExistingProofSubmission(db, existing, content, attachments, message);
+      return;
+    }
 
     await markProofOfWorkReminderSubmitted(db, registration.member_id, window.workDateUtc, now.toISOString());
 
@@ -1784,9 +1803,12 @@ async function handleStatefulReply(
 }
 
 
+type ProofWindow = ReturnType<typeof getProofSubmissionShiftWindow>;
+
 type ProofSubmissionEligibility =
-  | { allowed: true; window: ReturnType<typeof getProofSubmissionShiftWindow>; swap: SwapInfo | null }
-  | { allowed: false; message: string };
+  | { allowed: true; window: ProofWindow; swap: SwapInfo | null }
+  | { allowed: false; appendable: true; window: ProofWindow; swap: SwapInfo | null; existing: ProofOfWorkSubmission; message: string }
+  | { allowed: false; appendable?: false; message: string };
 
 async function getProofSubmissionEligibility(
   db: SupabaseRestClient,
@@ -1822,7 +1844,11 @@ async function getProofSubmissionEligibility(
   if (existingSubmission) {
     return {
       allowed: false,
-      message: `📎 You have already submitted proof of work for this work date. Only one proof submission is accepted per team member per day.\n\nWork Date: ${window.workDateUtc}\nSubmitted: ${formatUtc(new Date(existingSubmission.submitted_at_utc))} UTC\nStatus: ${existingSubmission.status === "late" ? "Late" : "Submitted"}`
+      appendable: true,
+      window,
+      swap: effective.swap,
+      existing: existingSubmission,
+      message: `📎 You have already submitted proof of work for this work date.\n\nWork Date: ${window.workDateUtc}\nSubmitted: ${formatUtc(new Date(existingSubmission.submitted_at_utc))} UTC\nStatus: ${existingSubmission.status === "late" ? "Late" : "Submitted"}`
     };
   }
 
@@ -1854,30 +1880,95 @@ function proofContentFromMessage(message: TelegramMessage): string {
   return "";
 }
 
+function isUniqueViolationError(error: unknown): boolean {
+  const messageText = error instanceof Error ? error.message : String(error);
+  return /\b409\b/.test(messageText) || /duplicate key|already exists|23505/i.test(messageText);
+}
+
+function mergeProofAttachments(
+  existing: SupportTicketAttachment[] | undefined,
+  incoming: SupportTicketAttachment[]
+): SupportTicketAttachment[] {
+  const base = Array.isArray(existing) ? existing : [];
+  const seenPaths = new Set(base.map((attachment) => attachment.path));
+  return [...base, ...incoming.filter((attachment) => !seenPaths.has(attachment.path))];
+}
+
+function mergeProofContent(existing: string, incoming: string): string {
+  const current = (existing ?? "").trim();
+  const addition = (incoming ?? "").trim();
+  if (!current) return addition;
+  if (!addition || current.includes(addition)) return current;
+  return `${current}\n${addition}`;
+}
+
+function countScreenshots(attachments: SupportTicketAttachment[]): number {
+  return attachments.filter((attachment) => attachment.type === "photo").length;
+}
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function appendToExistingProofSubmission(
+  db: SupabaseRestClient,
+  existing: ProofOfWorkSubmission,
+  content: string,
+  attachments: SupportTicketAttachment[],
+  message: TelegramMessage
+): Promise<void> {
+  const mergedAttachments = mergeProofAttachments(existing.attachments, attachments);
+  const mergedContent = mergeProofContent(existing.proof_content, content);
+  const proofType = getProofType(mergedContent, mergedAttachments.length);
+
+  await updateProofOfWorkSubmission(db, existing.id, {
+    proof_content: mergedContent,
+    proof_type: proofType,
+    attachments: mergedAttachments,
+    ...(message.media_group_id && !existing.source_media_group_id
+      ? { source_media_group_id: message.media_group_id }
+      : {})
+  });
+
+  const screenshotCount = countScreenshots(mergedAttachments);
+  const screenshotLine = screenshotCount > 0 ? `\nScreenshots: ${screenshotCount}` : "";
+  await sendMessage(
+    message.chat.id,
+    `✅ Added to your proof of work for ${existing.work_date_utc}.${screenshotLine}\nType: ${proofType}`,
+    { replyMarkup: dashboardKeyboard() }
+  );
+}
+
 async function appendProofOfWorkMediaGroupAttachment(
   db: SupabaseRestClient,
   message: TelegramMessage,
-  user: TelegramUser
+  user: TelegramUser,
+  options: { waitForSubmission?: boolean } = {}
 ): Promise<boolean> {
   if (!message.media_group_id || !message.photo?.length || isGroupChat(message.chat)) return false;
 
-  const submission = await findProofOfWorkSubmissionByMediaGroup(db, user.id, message.media_group_id);
+  let submission = await findProofOfWorkSubmissionByMediaGroup(db, user.id, message.media_group_id);
+  // The first album message may not have committed its submission yet; retry a
+  // couple of times so racing sibling photos still attach to the same proof.
+  if (!submission && options.waitForSubmission) {
+    for (let attempt = 0; attempt < 3 && !submission; attempt += 1) {
+      await delay(400);
+      submission = await findProofOfWorkSubmissionByMediaGroup(db, user.id, message.media_group_id);
+    }
+  }
   if (!submission) return false;
 
   const attachments = await saveProofOfWorkAttachments(db, submission.member_id, submission.work_date_utc, message);
   if (!attachments.length) return true;
 
-  const existingAttachments = Array.isArray(submission.attachments) ? submission.attachments : [];
-  const existingPaths = new Set(existingAttachments.map((attachment) => attachment.path));
-  const mergedAttachments = [
-    ...existingAttachments,
-    ...attachments.filter((attachment) => !existingPaths.has(attachment.path))
-  ];
+  const mergedAttachments = mergeProofAttachments(submission.attachments, attachments);
+  const proofType = getProofType(submission.proof_content, mergedAttachments.length);
 
-  await updateProofOfWorkSubmissionAttachments(db, submission.id, mergedAttachments);
+  await updateProofOfWorkSubmission(db, submission.id, {
+    attachments: mergedAttachments,
+    proof_type: proofType
+  });
   await sendMessage(
     message.chat.id,
-    `✅ Added screenshot ${mergedAttachments.length} to your proof of work for ${submission.work_date_utc}.`,
+    `✅ Added screenshot ${countScreenshots(mergedAttachments)} to your proof of work for ${submission.work_date_utc}.`,
     { replyMarkup: dashboardKeyboard() }
   );
   return true;
