@@ -259,9 +259,14 @@ export async function findProofOfWorkSubmission(
   return rows[0] ?? null;
 }
 
+export type CreateProofOfWorkSubmissionPayload = Omit<
+  ProofOfWorkSubmission,
+  "id" | "created_at" | "source_media_group_id" | "attachments"
+> & Partial<Pick<ProofOfWorkSubmission, "source_media_group_id" | "attachments">>;
+
 export async function createProofOfWorkSubmission(
   db: SupabaseRestClient,
-  payload: Omit<ProofOfWorkSubmission, "id" | "created_at">
+  payload: CreateProofOfWorkSubmissionPayload
 ): Promise<ProofOfWorkSubmission> {
   return single(await db.insert<ProofOfWorkSubmission>("proof_of_work_submissions", payload));
 }

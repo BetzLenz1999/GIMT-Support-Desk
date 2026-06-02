@@ -1618,8 +1618,8 @@ async function handleStatefulReply(
       proof_type: proofType,
       status,
       source_chat_id: message.chat.id,
-      source_media_group_id: message.media_group_id ?? null,
-      attachments
+      ...(message.media_group_id ? { source_media_group_id: message.media_group_id } : {}),
+      ...(attachments.length > 0 ? { attachments } : {})
     });
 
     await markProofOfWorkReminderSubmitted(db, registration.member_id, window.workDateUtc, now.toISOString());
