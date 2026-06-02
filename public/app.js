@@ -98,6 +98,7 @@ const state = {
     memberId: null,
     from: "",
     to: "",
+    view: "",
     loading: false,
     tickets: [],
     proof: [],
@@ -105,6 +106,20 @@ const state = {
     groupStats: []
   }
 };
+
+// Focused per-member views. Each maps a ?view= value to the member-profile
+// section it isolates. Used to build separate shareable links (e.g. for Discourse).
+const MEMBER_VIEWS = {
+  tickets: { section: "tickets", label: "Support Tickets" },
+  proof: { section: "proof", label: "Proof of Work" },
+  activity: { section: "activity", label: "Activity History" },
+  stats: { section: "stats", label: "Stats" }
+};
+
+function normalizeMemberView(value) {
+  const key = String(value || "").toLowerCase();
+  return MEMBER_VIEWS[key] ? key : "";
+}
 
 // ---------- helpers ----------
 
@@ -1285,20 +1300,24 @@ function getMemberUrlParams() {
   return {
     memberId: params.get("member") || "",
     from: params.get("from") || "",
-    to: params.get("to") || ""
+    to: params.get("to") || "",
+    view: normalizeMemberView(params.get("view"))
   };
 }
 
-function updateMemberUrlParams({ memberId, from, to, replace = false }) {
+function updateMemberUrlParams({ memberId, from, to, view = "", replace = false }) {
   const url = new URL(window.location.href);
   if (memberId) {
     url.searchParams.set("member", memberId);
     if (from) url.searchParams.set("from", from); else url.searchParams.delete("from");
     if (to) url.searchParams.set("to", to); else url.searchParams.delete("to");
+    const normalizedView = normalizeMemberView(view);
+    if (normalizedView) url.searchParams.set("view", normalizedView); else url.searchParams.delete("view");
   } else {
     url.searchParams.delete("member");
     url.searchParams.delete("from");
     url.searchParams.delete("to");
+    url.searchParams.delete("view");
   }
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (replace) window.history.replaceState({}, "", next);
@@ -1360,6 +1379,30 @@ function renderMemberProfileHeader() {
     from && to ? `Showing data from ${fmtDateHuman(from)} to ${fmtDateHuman(to)} (UTC)` : "\u2014";
   $("#member-from").value = from;
   $("#member-to").value = to;
+  applyMemberProfileView();
+}
+
+// Show only the section matching the active ?view=, or all sections when none.
+function applyMemberProfileView() {
+  const view = normalizeMemberView(state.memberProfile.view);
+  const activeSection = view ? MEMBER_VIEWS[view].section : "";
+  for (const section of $all("[data-member-section]")) {
+    const match = !activeSection || section.dataset.memberSection === activeSection;
+    section.classList.toggle("hidden", !match);
+  }
+  const banner = $("#member-focus-banner");
+  const label = $("#member-focus-label");
+  if (banner && label) {
+    if (view) {
+      label.textContent = MEMBER_VIEWS[view].label;
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
+  for (const btn of $all(".member-share-btn")) {
+    btn.classList.toggle("is-active", btn.dataset.shareView === view);
+  }
 }
 
 function renderMemberProfileTickets(rows) {
@@ -1563,10 +1606,12 @@ function openMemberProfile(memberId, opts = {}) {
   const range = (opts.from && opts.to)
     ? { from: opts.from, to: opts.to }
     : defaultMemberRange();
+  const view = normalizeMemberView(opts.view);
   state.memberProfile.memberId = memberId;
   state.memberProfile.from = range.from;
   state.memberProfile.to = range.to;
-  updateMemberUrlParams({ memberId, from: range.from, to: range.to, replace: Boolean(opts.replace) });
+  state.memberProfile.view = view;
+  updateMemberUrlParams({ memberId, from: range.from, to: range.to, view, replace: Boolean(opts.replace) });
   showMemberTabButton(true);
   switchTab("member");
 }
@@ -1577,20 +1622,27 @@ function showMemberTabButton(visible) {
   btn.classList.toggle("hidden", !visible);
 }
 
-function copyMemberShareLink() {
+// Build an absolute member link. Pass a MEMBER_VIEWS key to scope it to a single
+// section (Discourse-ready), or "" for the full profile.
+function buildMemberShareLink(view = "") {
   const { memberId, from, to } = state.memberProfile;
-  if (!memberId) return;
+  if (!memberId) return "";
   const url = new URL(window.location.href);
   url.searchParams.set("member", memberId);
   if (from) url.searchParams.set("from", from); else url.searchParams.delete("from");
   if (to) url.searchParams.set("to", to); else url.searchParams.delete("to");
+  const normalizedView = normalizeMemberView(view);
+  if (normalizedView) url.searchParams.set("view", normalizedView); else url.searchParams.delete("view");
   url.hash = "";
-  const link = url.toString();
-  const btn = $("#member-copy-link");
-  const originalText = btn?.textContent || "Copy shareable link";
+  return url.toString();
+}
+
+function copyTextToButton(link, btn, successText = "Link copied!") {
+  if (!link) return;
+  const originalText = btn?.textContent || "Copy link";
   const onDone = (ok) => {
     if (!btn) return;
-    btn.textContent = ok ? "Link copied!" : "Copy failed";
+    btn.textContent = ok ? successText : "Copy failed";
     setTimeout(() => { btn.textContent = originalText; }, 2000);
   };
   if (navigator.clipboard?.writeText) {
@@ -1598,6 +1650,10 @@ function copyMemberShareLink() {
   } else {
     fallbackCopy(link, onDone);
   }
+}
+
+function copyMemberShareLink() {
+  copyTextToButton(buildMemberShareLink(""), $("#member-copy-link"));
 }
 
 function fallbackCopy(text, onDone) {
@@ -1630,6 +1686,7 @@ function switchTab(name) {
   }
   if (name !== "member" && previousTab === "member") {
     state.memberProfile.memberId = null;
+    state.memberProfile.view = "";
     updateMemberUrlParams({ memberId: null });
     showMemberTabButton(false);
   }
@@ -1757,6 +1814,7 @@ async function init() {
       memberId: state.memberProfile.memberId,
       from: state.memberProfile.from,
       to: state.memberProfile.to,
+      view: state.memberProfile.view,
       replace: true
     });
     renderMemberProfileHeader();
@@ -1769,6 +1827,7 @@ async function init() {
       memberId: state.memberProfile.memberId,
       from: state.memberProfile.from,
       to: state.memberProfile.to,
+      view: state.memberProfile.view,
       replace: true
     });
     renderMemberProfileHeader();
@@ -1776,6 +1835,28 @@ async function init() {
   });
   $("#member-copy-link").addEventListener("click", copyMemberShareLink);
   $("#member-back-btn").addEventListener("click", () => switchTab("home"));
+
+  // Per-section "copy link" buttons (Support Tickets / Proof / Activity / Stats).
+  for (const btn of $all(".member-share-btn")) {
+    btn.addEventListener("click", () => {
+      const view = normalizeMemberView(btn.dataset.shareView);
+      if (!view || !state.memberProfile.memberId) return;
+      copyTextToButton(buildMemberShareLink(view), btn, "Copied!");
+    });
+  }
+  // "View full profile" inside the focused-view banner.
+  $("#member-view-all").addEventListener("click", () => {
+    if (!state.memberProfile.memberId) return;
+    state.memberProfile.view = "";
+    updateMemberUrlParams({
+      memberId: state.memberProfile.memberId,
+      from: state.memberProfile.from,
+      to: state.memberProfile.to,
+      view: "",
+      replace: true
+    });
+    applyMemberProfileView();
+  });
 
   window.addEventListener("popstate", () => {
     const params = getMemberUrlParams();
@@ -1786,10 +1867,12 @@ async function init() {
       state.memberProfile.memberId = params.memberId;
       state.memberProfile.from = range.from;
       state.memberProfile.to = range.to;
+      state.memberProfile.view = params.view;
       showMemberTabButton(true);
       switchTab("member");
     } else if (state.currentTab === "member") {
       state.memberProfile.memberId = null;
+      state.memberProfile.view = "";
       showMemberTabButton(false);
       switchTab("home");
     }
@@ -1864,11 +1947,13 @@ async function init() {
     state.memberProfile.memberId = initialUrl.memberId;
     state.memberProfile.from = range.from;
     state.memberProfile.to = range.to;
+    state.memberProfile.view = initialUrl.view;
     if (!initialUrl.from || !initialUrl.to) {
       updateMemberUrlParams({
         memberId: initialUrl.memberId,
         from: range.from,
         to: range.to,
+        view: initialUrl.view,
         replace: true
       });
     }
