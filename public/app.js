@@ -131,6 +131,18 @@ function safeExternalUrl(value) {
   }
 }
 
+function safeImageUrl(value) {
+  try {
+    const raw = String(value ?? "");
+    const url = new URL(raw, window.location.origin);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    if (raw.startsWith("/") && url.origin !== window.location.origin) return "";
+    return url.href;
+  } catch (_error) {
+    return "";
+  }
+}
+
 function linkifyProofContent(value) {
   const text = String(value ?? "");
   const urlPattern = /https?:\/\/[^\s<>()]+[^\s<>().,;:!?]/gi;
@@ -152,13 +164,13 @@ function linkifyProofContent(value) {
 
 function renderProofAttachments(row) {
   const attachments = Array.isArray(row.attachments) ? row.attachments : [];
-  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && safeExternalUrl(attachment.url));
+  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && safeImageUrl(attachment.url));
   if (!photos.length) return "";
 
   return `
     <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
       ${photos.map((attachment, index) => {
-        const imageUrl = safeExternalUrl(attachment.url);
+        const imageUrl = safeImageUrl(attachment.url);
         return `
           <a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer" class="block rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900">
             <img src="${escapeHtml(imageUrl)}" alt="Proof of work screenshot ${index + 1}" loading="lazy" class="max-h-72 w-full object-contain bg-slate-100 dark:bg-slate-950" />
@@ -993,17 +1005,20 @@ function ticketGroupName(row) {
 
 function renderTicketMessageAttachments(message) {
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && attachment.url);
+  const photos = attachments.filter((attachment) => attachment && attachment.type === "photo" && safeImageUrl(attachment.url));
   if (!photos.length) return "";
 
   return `
     <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-      ${photos.map((attachment, index) => `
-        <a href="${escapeHtml(attachment.url)}" target="_blank" rel="noopener noreferrer" class="block rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-900">
-          <img src="${escapeHtml(attachment.url)}" alt="Ticket photo attachment ${index + 1}" loading="lazy" class="max-h-64 w-full object-contain bg-slate-100 dark:bg-slate-900" />
-          <div class="px-2 py-1 text-[11px] text-blue-600 dark:text-blue-300">Open image</div>
-        </a>
-      `).join("")}
+      ${photos.map((attachment, index) => {
+        const imageUrl = safeImageUrl(attachment.url);
+        return `
+          <a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer" class="block rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50 dark:bg-slate-900">
+            <img src="${escapeHtml(imageUrl)}" alt="Ticket photo attachment ${index + 1}" loading="lazy" class="max-h-64 w-full object-contain bg-slate-100 dark:bg-slate-900" />
+            <div class="px-2 py-1 text-[11px] text-blue-600 dark:text-blue-300">Open image</div>
+          </a>
+        `;
+      }).join("")}
     </div>
   `;
 }
