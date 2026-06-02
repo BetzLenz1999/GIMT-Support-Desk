@@ -37,6 +37,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/web/telegram-photo"
+  to = "/.netlify/functions/web-telegram-photo"
+  status = 200
+
+[[redirects]]
   from = "/api/telegram/webhook"
   to = "/.netlify/functions/telegram-webhook"
   status = 200

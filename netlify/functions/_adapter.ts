@@ -77,7 +77,7 @@ function createVercelStyleRequest(event: NetlifyEvent): any {
 
 function createVercelStyleResponse() {
   const headers: Record<string, string> = {};
-  let body = "";
+  let body: Buffer | string = "";
   return {
     get body() {
       return body;
@@ -88,7 +88,7 @@ function createVercelStyleResponse() {
       headers[name.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
     },
     end(payload?: unknown) {
-      if (payload !== undefined) body = Buffer.isBuffer(payload) ? payload.toString("utf8") : String(payload);
+      if (payload !== undefined) body = Buffer.isBuffer(payload) ? payload : String(payload);
     }
   };
 }
@@ -108,10 +108,12 @@ export function createNetlifyHandler(vercelHandler: VercelStyleHandler) {
 
     await vercelHandler(request, response);
 
+    const isBinaryBody = Buffer.isBuffer(response.body);
     return {
       statusCode: response.statusCode,
       headers: response.headers,
-      body: response.body
+      body: isBinaryBody ? response.body.toString("base64") : response.body,
+      isBase64Encoded: isBinaryBody
     };
   };
 }

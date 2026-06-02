@@ -518,9 +518,22 @@ async function saveTelegramPhotoAttachments(
     if (aArea !== bArea) return bArea - aArea;
     return (b.file_size ?? 0) - (a.file_size ?? 0);
   })[0];
+  const fallbackAttachment: SupportTicketAttachment = {
+    type: "photo",
+    bucket: "telegram",
+    path: `telegram/${largestPhoto.file_unique_id ?? largestPhoto.file_id}`,
+    url: `/api/web/telegram-photo?file_id=${encodeURIComponent(largestPhoto.file_id)}`,
+    telegram_file_id: largestPhoto.file_id,
+    telegram_file_unique_id: largestPhoto.file_unique_id,
+    file_size: largestPhoto.file_size,
+    width: largestPhoto.width,
+    height: largestPhoto.height,
+    content_type: null
+  };
 
   try {
     const telegramFile = await getFile(largestPhoto.file_id);
+    fallbackAttachment.file_size = telegramFile.file_size ?? largestPhoto.file_size;
     if (!telegramFile.file_path) throw new Error("Telegram did not return a file_path for this photo.");
 
     const downloaded = await downloadFile(telegramFile.file_path);
@@ -544,9 +557,9 @@ async function saveTelegramPhotoAttachments(
     }];
   } catch (error) {
     console.warn(
-      `Failed to save Telegram photo attachment for ${warningContext}, message ${message.message_id}: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to save Telegram photo attachment for ${warningContext}, message ${message.message_id}; using Telegram proxy fallback: ${error instanceof Error ? error.message : String(error)}`
     );
-    return [];
+    return [fallbackAttachment];
   }
 }
 
