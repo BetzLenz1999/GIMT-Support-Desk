@@ -1629,30 +1629,48 @@ async function handleStatefulReply(
     const status = now.getTime() > window.end.getTime() ? "late" : "submitted";
     const proofType = getProofType(content, attachments.length);
 
+    const basePayload = {
+      member_id: registration.member_id,
+      member_name: registration.member_name,
+      telegram_user_id: user.id,
+      work_date_utc: window.workDateUtc,
+      scheduled_out_utc: window.end.toISOString(),
+      submitted_at_utc: now.toISOString(),
+      proof_content: content,
+      proof_type: proofType,
+      status,
+      source_chat_id: message.chat.id
+    };
+
+    let attachmentsPersisted = attachments.length > 0;
     try {
       await createProofOfWorkSubmission(db, {
-        member_id: registration.member_id,
-        member_name: registration.member_name,
-        telegram_user_id: user.id,
-        work_date_utc: window.workDateUtc,
-        scheduled_out_utc: window.end.toISOString(),
-        submitted_at_utc: now.toISOString(),
-        proof_content: content,
-        proof_type: proofType,
-        status,
-        source_chat_id: message.chat.id,
+        ...basePayload,
         ...(message.media_group_id ? { source_media_group_id: message.media_group_id } : {}),
         ...(attachments.length > 0 ? { attachments } : {})
       });
     } catch (error) {
-      // A concurrent album message (or a quick repeat) may have already created
-      // today's submission. Merge into it rather than surfacing a generic error.
-      if (!isUniqueViolationError(error)) throw error;
-      const existing = await findProofOfWorkSubmission(db, registration.member_id, window.workDateUtc);
-      if (!existing) throw error;
-      await appendToExistingProofSubmission(db, existing, content, attachments, message);
-      return;
+      if (isUniqueViolationError(error)) {
+        // A concurrent album message (or a quick repeat) may have already created
+        // today's submission. Merge into it rather than surfacing a generic error.
+        const existing = await findProofOfWorkSubmission(db, registration.member_id, window.workDateUtc);
+        if (!existing) throw error;
+        await appendToExistingProofSubmission(db, existing, content, attachments, message);
+        return;
+      }
+      if (attachments.length > 0 && isMissingProofColumnError(error)) {
+        // The attachments/source_media_group_id columns aren't in the database
+        // yet (supabase/schema.sql not applied). Don't lose the proof: record
+        // the text/links and tell the member their screenshot wasn't stored.
+        console.error("proof_of_work_submissions is missing attachment columns; saving text-only:", error);
+        await createProofOfWorkSubmission(db, { ...basePayload, proof_type: getProofType(content, 0) });
+        attachmentsPersisted = false;
+      } else {
+        throw error;
+      }
     }
+
+    const effectiveType = attachmentsPersisted ? proofType : getProofType(content, 0);
 
     await markProofOfWorkReminderSubmitted(db, registration.member_id, window.workDateUtc, now.toISOString());
 
@@ -1662,12 +1680,15 @@ async function handleStatefulReply(
       telegram_user_id: user.id,
       action: "PROOF_OF_WORK_SUBMITTED",
       message: `${registration.member_name} submitted proof of work with status: ${status}.${swap ? ` (covering ${swap.counterpartMemberName})` : ""}`,
-      metadata: { proofType, status, workDateUtc: window.workDateUtc, attachmentCount: attachments.length, ...buildSwapMetadata(swap) }
+      metadata: { proofType: effectiveType, status, workDateUtc: window.workDateUtc, attachmentCount: attachmentsPersisted ? attachments.length : 0, ...buildSwapMetadata(swap) }
     });
 
+    const storageWarning = attachments.length > 0 && !attachmentsPersisted
+      ? "\n\n⚠️ Screenshot received but not stored yet — the database needs the proof attachment migration (apply supabase/schema.sql). Your notes/links were saved."
+      : "";
     await sendMessage(
       message.chat.id,
-      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: ${status === "late" ? "Late" : "Submitted"}\nType: ${proofType}`,
+      `✅ Thank you, ${registration.member_name}. Your proof of work has been submitted successfully.\n\nStatus: ${status === "late" ? "Late" : "Submitted"}\nType: ${effectiveType}${storageWarning}`,
       { replyMarkup: dashboardKeyboard() }
     );
 
@@ -1679,7 +1700,7 @@ async function handleStatefulReply(
       registration.member_id,
       window.workDateUtc,
       "proof_of_work_ack",
-      buildProofOfWorkAckText(proofMention, status, proofType)
+      buildProofOfWorkAckText(proofMention, status, effectiveType)
     );
     return;
   }
@@ -1883,6 +1904,16 @@ function proofContentFromMessage(message: TelegramMessage): string {
 function isUniqueViolationError(error: unknown): boolean {
   const messageText = error instanceof Error ? error.message : String(error);
   return /\b409\b/.test(messageText) || /duplicate key|already exists|23505/i.test(messageText);
+}
+
+// Database hasn't had supabase/schema.sql applied, so the attachments /
+// source_media_group_id columns don't exist yet.
+function isMissingProofColumnError(error: unknown): boolean {
+  const messageText = error instanceof Error ? error.message : String(error);
+  return /PGRST204/i.test(messageText)
+    || /could not find the '.*' column/i.test(messageText)
+    || /column .*(attachments|source_media_group_id).* does not exist/i.test(messageText)
+    || /\b42703\b/.test(messageText);
 }
 
 function mergeProofAttachments(
