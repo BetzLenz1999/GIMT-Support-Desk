@@ -134,6 +134,28 @@ Late By: ${formatDuration(minutesSinceStart)}`;
         }
       }
 
+      // DM each member once while their shift is active so they greet the groups as today's support.
+      if (minutesSinceStart >= 0 && minutesUntilEnd > 0) {
+        const greetingMessage = language === "es"
+          ? `👋 ¡Hola ${member.name}, tu turno ha comenzado!
+
+No olvides saludar a los grupos para que sepan quién está de soporte hoy. Puedes enviar algo como:
+
+"Hola a todos: soy ${member.name}, tu asistente de hoy. ¡No dudes en escribirme si necesitas algo!"
+
+Turno: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
+Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`
+          : `👋 Hi ${member.name}, your shift has started!
+
+Don't forget to greet the groups so everyone knows who's on support today. You can send something like:
+
+"Hi everyone! I'm ${member.name}, I'm your assistant today. Feel free to reach out if you need anything."
+
+Shift: ${member.shiftStartUtc}–${member.shiftEndUtc} UTC
+Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}`;
+        sent += await sendOnce(db, registration, window.workDateUtc, "shift_greeting", greetingMessage, dashboardKeyboard());
+      }
+
       if (hasTimedIn && !hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
         const personalProofMessage = buildProofOfWorkReminderMessage(member.name, window.end, member.timezone, language);
         sent += await sendProofOfWorkOnce(db, registration, window.workDateUtc, window.end, now, "personal", personalProofMessage);
