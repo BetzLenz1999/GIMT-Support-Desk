@@ -1,12 +1,14 @@
 import { optionalEnv } from "./config.js";
 import {
   getAppSetting,
+  hasCronEvent,
   listExpiredGroupActionMessages,
   listPendingGroupActionMessages,
   markGroupActionMessageCleared,
+  recordCronEvent,
   upsertAppSetting
 } from "./repository.js";
-import { getSupabase, type GroupActionType, type SupabaseRestClient } from "./supabase.js";
+import { getSupabase, type GroupActionType, type Registration, type SupabaseRestClient } from "./supabase.js";
 import { TelegramApiError, deleteMessage, sendMessage, type SendMessageOptions, type SentTelegramMessage } from "./telegram.js";
 
 const TEAM_GROUP_CHAT_ID_ENV = "TEAM_GROUP_CHAT_ID";
@@ -230,4 +232,71 @@ export async function sweepExpiredGroupActionMessages(
     cleared += 1;
   }
   return cleared;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function buildMemberMention(registration: Pick<Registration, "telegram_username" | "telegram_user_id" | "member_name">): string {
+  const displayName = escapeHtml(registration.member_name);
+  if (registration.telegram_username?.trim()) {
+    return `@${escapeHtml(registration.telegram_username.trim())} (${displayName})`;
+  }
+  return `<a href="tg://user?id=${registration.telegram_user_id}">${displayName}</a>`;
+}
+
+export async function getSupportIntroTargetChatIds(db: SupabaseRestClient): Promise<number[]> {
+  const chatIds = new Set<number>();
+  for (const id of getStatsGroupChatIds()) chatIds.add(id);
+  let primaryChatId: number | undefined;
+  try {
+    primaryChatId = getTeamGroupChatId();
+  } catch (error) {
+    console.error("Invalid TEAM_GROUP_CHAT_ID in support intro sweep", error);
+  }
+  if (primaryChatId !== undefined) chatIds.add(primaryChatId);
+  if (chatIds.size === 0) {
+    const storedChatId = await getStoredTeamGroupChatId();
+    if (storedChatId !== undefined) chatIds.add(storedChatId);
+  }
+  return [...chatIds];
+}
+
+export async function sendSupportIntroToGroups(
+  db: SupabaseRestClient,
+  registration: Pick<Registration, "telegram_user_id" | "telegram_username" | "member_id" | "member_name">,
+  workDateUtc: string
+): Promise<number> {
+  const chatIds = await getSupportIntroTargetChatIds(db);
+  let sent =  ​0;
+  for (const chatId of chatIds) {
+    const eventKey = `support_intro:${chatId}:${registration.member_id}:${workDateUtc}`;
+    if (await hasCronEvent(db, eventKey)) continue;
+
+    const mention = buildMemberMention(registration);
+    const message =
+      "👋 <b>Hi everyone!</b>\n\n" +
+      `Your assistant today is ${mention} — ask anything about ` +
+      "GoodDollar, face verification, swap, bridge,and more. We're here to help you! 🚀";
+
+    try {
+      await sendMessage(chatId, message, { parseMode: "HTML" });
+    } catch (error) {
+      console.error(
+        `Failed to send support intro to chat ${chatId} for ${registration.member_id}/${workDateUtc}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      continue;
+    }
+
+    try {
+      await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, "support_intro");
+    } catch (error) {
+      console.error(
+        `Failed to record support intro cron event ${eventKey}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    sent +=  ​1;
+  }
+  return sent;
 }

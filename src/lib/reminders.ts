@@ -1,6 +1,6 @@
 import type { Registration, SupabaseRestClient } from "./supabase.js";
 import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
-import { sendTeamGroupMessage, sweepExpiredGroupActionMessages } from "./group-notifications.js";
+import { sendSupportIntroToGroups, sendTeamGroupMessage, sweepExpiredGroupActionMessages } from "./group-notifications.js";
 import { dashboardKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
 import { TEAM_SCHEDULE, getTeamMember } from "./team-schedule.js";
 import { sendMessage } from "./telegram.js";
@@ -40,10 +40,11 @@ function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): bool
   return minutesSinceTarget >= startMinutesAfter;
 }
 
-export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
+export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; supportIntroSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
   let sent = 0;
-  let groupSent = 0;
-  let errors = 0;
+  let groupSent =  ​0;
+  let supportIntroSent =  0;
+  let errors =  0;
   const registrations = await listRegistrations(db);
 
   // Attendance and proof-of-work reminder nudges stay private; group posts are not sent for these events.
@@ -158,6 +159,17 @@ Local: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.en
         sent += await sendOnce(db, registration, window.workDateUtc, "shift_greeting", greetingMessage, dashboardKeyboard());
       }
 
+      if (minutesSinceStart >= 0 && minutesUntilEnd > 0) {
+        try {
+          supportIntroSent += await sendSupportIntroToGroups(db, registration, window.workDateUtc);
+        } catch (error) {
+          errors += 1;
+          console.error(
+            `Support intro failed for member ${registration.member_id}/${window.workDateUtc}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       if (hasTimedIn && !hasTimedOut && isDueBetween(minutesUntilEnd, PROOF_OF_WORK_REMINDER_MINUTES, PRE_OUT_MINUTES)) {
         const personalProofMessage = buildProofOfWorkReminderMessage(member.name, window.end, member.timezone, language);
         sent += await sendProofOfWorkOnce(db, registration, window.workDateUtc, window.end, now, "personal", personalProofMessage);
@@ -264,7 +276,7 @@ Current: ${formatUtc(now)} UTC`;
   }
 
 
-  return { sent, groupSent, encouragementSent, sweptExpired, inactiveClosedTickets, errors };
+  return { sent, groupSent, supportIntroSent, encouragementSent, sweptExpired, inactiveClosedTickets, errors };
 }
 
 async function sendTeamEncouragementReminder(
