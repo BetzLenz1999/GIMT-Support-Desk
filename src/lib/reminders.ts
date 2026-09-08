@@ -29,6 +29,8 @@ const PROOF_OF_WORK_REMINDER_MINUTES = 60;
 const LATE_AFTER_MINUTES = 5;
 const MISSING_OUT_AFTER_MINUTES = 5;
 const SUPPORT_TICKET_INACTIVITY_TIMEOUT_MINUTES = 30;
+const TEAM_ENCOURAGEMENT_UTC_HOUR = 5; // 1:00 PM Philippines time (Asia/Manila, UTC+8, no DST)
+const TEAM_ENCOURAGEMENT_EVENT = "team_encouragement";
 
 function isDueBetween(minutesUntilTarget: number, startMinutesBefore: number, stopMinutesBefore: number): boolean {
   return minutesUntilTarget <= startMinutesBefore && minutesUntilTarget > stopMinutesBefore;
@@ -38,7 +40,7 @@ function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): bool
   return minutesSinceTarget >= startMinutesAfter;
 }
 
-export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
+export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
   let sent = 0;
   let groupSent = 0;
   let errors = 0;
@@ -248,7 +250,115 @@ Current: ${formatUtc(now)} UTC`;
     console.error(`Inactive support ticket sweep failed: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 
-  return { sent, groupSent, sweptExpired, inactiveClosedTickets, errors };
+  let encouragementSent = 0;
+  try {
+    encouragementSent = await sendTeamEncouragementReminder(
+      db,
+      now,
+    );
+  } catch (error) {
+    errors += 1;
+    console.error(
+      `Team encouragement reminder failed: ${error instanceof Error ? error.message : String(error)}`, error,
+    );
+  }
+
+
+  return { sent, groupSent, encouragementSent, sweptExpired, inactiveClosedTickets, errors };
+}
+
+async function sendTeamEncouragementReminder(
+  db: SupabaseRestClient,
+  now: Date,
+): Promise<number> {
+  const philippinesTarget = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      TEAM_ENCOURAGEMENT_UTC_HOUR,
+      0,
+    ),
+  );
+  if (now.getTime() < philippinesTarget.getTime()) return 0;
+
+  const workDateUtc = utcDateKey(now);
+  const eventType = TEAM_ENCOURAGEMENT_EVENT;
+
+  const mainEventKey = `team_encouragement:main:${workDateUtc}`;
+  const spanishEventKey = `team_encouragement:es:${workDateUtc}`;
+
+  if (
+    await hasCronEvent(
+      db,
+      mainEventKey,
+    ) &&
+    await hasCronEvent(
+      db,
+      spanishEventKey,
+    )
+  ) return 0;
+
+  let sent = 0;
+
+  const mainMessage =
+    "🙌 <b>Good afternoon, amazing team!</b>" +
+    "\n\nHello Betz, Omar, Moh, Pablo,and Danny 👋" +
+    "\n\nLet’s give our best today. Every ticket, every reply,and every small effort helps our community thrive. 💪" +
+    "\n\nDo your best — we’ve got this together! 🌟" +
+    "\n\n— Community Moderator";
+
+  const spanishMessage =
+    "¡Hola Pablo y Danny! 👋" +
+    "\n\nComo moderador de la comunidad, les recuerdo que hoy demos lo mejor de nosotros." +
+    "\n\nSu trabajo y dedicación hacen una gran diferencia para nuestros usuarios. ¡Ánimo, equipo! 💪🌟";
+
+  if (
+    await hasCronEvent(
+      db,
+      mainEventKey,
+    ) === false
+  ) {
+    const mainSent = await sendTeamGroupMessage(
+      mainMessage,
+      {
+        parseMode: "HTML",
+      },
+    );
+    if (mainSent) {
+      await recordCronEvent(
+        db,
+        mainEventKey,
+        "team",
+        workDateUtc,
+        eventType,
+      );
+      sent += 1;
+    }
+  }
+
+  if (
+    await hasCronEvent(
+      db,
+      spanishEventKey,
+    ) === false
+  ) {
+    const spanishSent = await sendTeamGroupMessage(
+      spanishMessage,
+    );
+    if (spanishSent) {
+      await recordCronEvent(
+        db,
+        spanishEventKey,
+        "team",
+        workDateUtc,
+        eventType,
+      );
+      sent += 1;
+    }
+  }
+
+  return sent;
 }
 
 async function sendUnregisteredMembersReminder(
