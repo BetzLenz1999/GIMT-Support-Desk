@@ -602,6 +602,24 @@ export async function listRecentBotSupportTicketMessages(
   );
 }
 
+/** Returns the customer message a team reply should be attached to. */
+export async function findLatestCustomerSupportTicketMessage(
+  db: SupabaseRestClient,
+  ticketId: string
+): Promise<SupportTicketMessage | null> {
+  const messages = await db.select<SupportTicketMessage>(
+    "support_ticket_messages",
+    params(
+      eq("ticket_id", ticketId),
+      eq("sender_type", "customer"),
+      order("message_date_utc", false),
+      order("created_at", false),
+      limit(1)
+    )
+  );
+  return messages[0] ?? null;
+}
+
 
 export async function listActiveSupportTicketsForInactivitySweep(
   db: SupabaseRestClient,
