@@ -35,7 +35,6 @@ import {
 } from "./repository.js";
 import {
   clearGroupActionMessages,
-  getStatsGroupChatIds,
   getTeamGroupChatId,
   isStatsGroupEnabled,
   rememberTeamGroupChatId,
@@ -190,7 +189,6 @@ async function trackGroupMessage(
     }
 
     const messageText = message.text?.trim() ?? "";
-    const supportText = messageText || message.caption?.trim() || "";
     const isSlashCommand = messageText.startsWith("/");
 
     if (isSlashCommand) {
@@ -241,14 +239,7 @@ async function trackGroupMessage(
       return;
     }
 
-    if (isSupportTicketOpeningText(supportText)) {
-      await openSupportTicket(db, message, user);
-      return;
-    }
-
-    console.info(
-      `Ignoring non-support message from unregistered user ${user.id} in chat ${message.chat.id}. No support ticket opened.`
-    );
+    await openSupportTicket(db, message, user);
     return;
   }
 
@@ -717,7 +708,7 @@ async function recordCustomerTicketFollowUp(
 
 function isTeamInboxTargetChat(chatId: number): boolean {
   try {
-    if (getStatsGroupChatIds().includes(chatId)) return true;
+    if (isStatsGroupEnabled(chatId)) return true;
   } catch (error) {
     console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS in team inbox target check", error);
   }
