@@ -49,7 +49,7 @@ import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMess
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { getSupportMode, isTeamInboxEnabled, TEAM_INBOX_PRIMARY_GRACE_MINUTES } from "./config.js";
 import { detectAiSupportTemplate, type AiSupportDashboardStatus, type AiSupportMatch } from "./ai-support.js";
-import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
+import { isBeforeScheduledTime, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, signedMinutesBetween, utcDateKey } from "./time.js";
 
 export async function handleTelegramUpdate(db: SupabaseRestClient, update: TelegramUpdate): Promise<void> {
   try {
@@ -2545,11 +2545,11 @@ async function handleTimeIn(db: SupabaseRestClient, chatId: number, messageId: n
     return;
   }
 
-  if (isTooEarlyToTimeIn(window.start, now)) {
+  if (isBeforeScheduledTime(window.start, now)) {
     await editMessageText(
       chatId,
       messageId,
-      `⚠️ Your shift hasn't started yet.\n\n👤 ${registration.member_name}${swapLine}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\n\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
+      `⚠️ Time In is not open yet.\n\n👤 ${registration.member_name}${swapLine}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\n\nTime In is available at the scheduled start time.`,
       { replyMarkup: dashboardKeyboard() }
     );
     const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
@@ -2558,7 +2558,7 @@ async function handleTimeIn(db: SupabaseRestClient, chatId: number, messageId: n
 ${mention} tried to Time In before the allowed window.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}
 Scheduled start: ${formatUtc(window.start)} UTC
 Local: ${formatLocal(window.start, member.timezone)}
-Allowed from: ${formatUtc(new Date(window.start.getTime() - EARLY_TIME_IN_GRACE_MINUTES * 60_000))} UTC`, { parseMode: "HTML" });
+Available from: ${formatUtc(window.start)} UTC`, { parseMode: "HTML" });
     return;
   }
 
@@ -2628,6 +2628,23 @@ async function handleTimeOut(db: SupabaseRestClient, chatId: number, messageId: 
     return;
   }
 
+  if (isBeforeScheduledTime(window.end, now)) {
+    await editMessageText(
+      chatId,
+      messageId,
+      `⚠️ Time Out is not open yet.\n\n👤 ${registration.member_name}${swapLine}\nScheduled out: ${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.end, member.timezone)}\n\nTime Out is available at the scheduled end time.`,
+      { replyMarkup: dashboardKeyboard() }
+    );
+    const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
+    await sendTeamGroupMessage(`⚠️ Early Time Out Blocked
+
+${mention} tried to Time Out before the scheduled end.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}
+Scheduled out: ${formatUtc(window.end)} UTC
+Local: ${formatLocal(window.end, member.timezone)}
+Available from: ${formatUtc(window.end)} UTC`, { parseMode: "HTML" });
+    return;
+  }
+
   const earlyOutMinutes = calculateEarlyOutMinutes(window.end, now);
   const overtimeMinutes = calculateOvertimeMinutes(window.end, now);
   const workedMinutes = Math.max(0, signedMinutesBetween(new Date(log.actual_in_utc), now));
@@ -2687,10 +2704,10 @@ async function handleGroupTimeIn(
     return;
   }
 
-  if (isTooEarlyToTimeIn(window.start, now)) {
+  if (isBeforeScheduledTime(window.start, now)) {
     await sendMessage(
       chatId,
-      `⚠️ ${mention}, your shift hasn't started yet.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\nYou can Time In up to ${EARLY_TIME_IN_GRACE_MINUTES} minutes before your shift starts.`,
+      `⚠️ ${mention}, Time In is not open yet.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\nTime In is available at the scheduled start time.`,
       { parseMode: "HTML" }
     );
     return;
@@ -2757,6 +2774,15 @@ async function handleGroupTimeOut(
 
   if (log.actual_out_utc) {
     await deleteMessage(chatId, clickedMessageId);
+    return;
+  }
+
+  if (isBeforeScheduledTime(window.end, now)) {
+    await sendMessage(
+      chatId,
+      `⚠️ ${mention}, Time Out is not open yet.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled out: ${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.end, member.timezone)}\nTime Out is available at the scheduled end time.`,
+      { parseMode: "HTML" }
+    );
     return;
   }
 
