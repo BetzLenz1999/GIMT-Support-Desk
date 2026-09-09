@@ -152,7 +152,7 @@ The reminders are only automatic when the host runs the timekeeping cron on a sc
 
 If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically, including the daily "assistant today" intros in the stats groups.
 
-The "assistant today" intro fires while a member's shift is active and targets every chat ID in `TEAM_STATS_GROUP_CHAT_IDS` (plus `TEAM_GROUP_CHAT_ID` if it is not already included**. It is sent at most once per member per group per UTC work date — tracked by `cron_events` — so each of the 5 daily shift starts posts exactly one intro per group.
+The "assistant today" intro fires while a member's shift is active and targets only the chat IDs listed in `TEAM_STATS_GROUP_CHAT_IDS`. It never targets `TEAM_GROUP_CHAT_ID` unless that same ID is explicitly included in `TEAM_STATS_GROUP_CHAT_IDS`. It is sent at most once per member per group per UTC work date — tracked by `cron_events` — so each of the 5 daily shift starts posts exactly one intro per group.
 
 ### Multiple group stats setup
 
