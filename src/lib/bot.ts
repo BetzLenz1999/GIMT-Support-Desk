@@ -5,6 +5,7 @@ import {
   createActivity,
   createProofOfWorkSubmission,
   createSupportTicket,
+  findLatestCustomerSupportTicketMessage,
   findActiveSupportTicketByMessageReference,
   findActiveSupportTicketForUser,
   findApprovedSwapsForMember,
@@ -102,6 +103,10 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     return;
   }
 
+  if (isGroupChat(message.chat) && message.new_chat_members?.length) {
+    await welcomeNewStatsGroupMembers(db, message);
+  }
+
   if (isChatIdCommand(command)) {
     await sendMessage(message.chat.id, buildChatIdText(message.chat));
     return;
@@ -167,6 +172,32 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   }
 
   await sendMessage(message.chat.id, "Please use the buttons below.", { replyMarkup: dashboardKeyboard() });
+}
+
+/** Welcomes people only in the explicitly configured public support/stat groups. */
+async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: TelegramMessage): Promise<void> {
+  let statsChatIds: number[];
+  try {
+    statsChatIds = getStatsGroupChatIds();
+  } catch (error) {
+    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS while handling group welcome", error);
+    return;
+  }
+
+  // An empty list means stats are permissive for backwards compatibility, but
+  // group welcomes are opt-in to avoid posting unexpectedly in every group.
+  if (!statsChatIds.includes(message.chat.id)) return;
+
+  await rememberTelegramGroup(db, message.chat);
+  const members = (message.new_chat_members ?? []).filter((member) => !member.is_bot);
+  if (!members.length) return;
+
+  const names = members.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
+  await sendMessage(
+    message.chat.id,
+    `👋 Welcome, ${names}! You can send your question here and our support team will assist you as soon as possible.`,
+    { parseMode: "HTML", replyToMessageId: message.message_id }
+  );
 }
 
 const trackGroupMessageWarnings = {
@@ -1027,6 +1058,7 @@ async function handleSupportReplyCallback(
  
    await answerCallbackQuery(callback.id, "Type your reply below.The bot will post it in the group with your name signature.");
  
+   const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
    const groupTitle = ticket.group_title ?? String(ticket.telegram_chat_id);
    const customerName = ticket.opened_by_name;
  
@@ -1042,7 +1074,7 @@ async function handleSupportReplyCallback(
    await editMessageText(
      chatId,
      messageId,
-     `📩 ${customerName} asked in ${groupTitle}:\n“${escapeHtmlForMention(truncateMessage(ticket.opened_message_text,120))}”\n\nType your reply below.It will be posted in the group with your name signature.`,
+     `📩 Latest message from ${customerName} in ${groupTitle}:\n“${escapeHtmlForMention(truncateMessage(latestCustomerMessage?.message_text ?? ticket.opened_message_text,120))}”\n\nType your reply below. It will be posted as a reply to the latest customer message in the group with your name signature.`,
      { replyMarkup: homeKeyboard() }
    );
  }
@@ -1141,18 +1173,20 @@ async function postSupportReplyAsBot(
 ): Promise<SentTelegramMessage | null> {
 
   const replyBody = `📩 ${escapeHtmlForMention(input.text)}\n\n— ${input.mention}`;
+  const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
+  const replyToMessageId = latestCustomerMessage?.telegram_message_id ?? ticket.opened_message_id;
 
   try {
     const sent = await sendMessage(input.chatId, replyBody, {
       parseMode: "HTML",
-      replyToMessageId: ticket.opened_message_id
+      replyToMessageId
     });
 
     await recordSupportTicketMessage(db, {
       ticket_id: ticket.id,
       telegram_chat_id: input.chatId,
       telegram_message_id: sent.message_id,
-      reply_to_message_id: ticket.opened_message_id,
+      reply_to_message_id: replyToMessageId,
       telegram_user_id: registration.telegram_user_id,
       sender_name: registration.member_name,
       sender_type: "team_member",
@@ -1168,7 +1202,7 @@ async function postSupportReplyAsBot(
       actor_type: "team_member",
       telegram_chat_id: input.chatId,
       telegram_message_id: sent.message_id,
-      metadata: { replyText: input.text, repliedToMessageId: ticket.opened_message_id }
+      metadata: { replyText: input.text, repliedToMessageId: replyToMessageId }
     });
 
     if (!ticket.assigned_member_id) {
@@ -1176,7 +1210,7 @@ async function postSupportReplyAsBot(
         await connectTicketToTeamMember(db, ticket, registration, {
           chatId: input.chatId,
           telegramMessageId: sent.message_id,
-          replyToMessageId: ticket.opened_message_id,
+          replyToMessageId,
           eventType: "ticket_accepted"
         });
       } catch (connectError) {
