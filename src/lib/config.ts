@@ -16,7 +16,8 @@ export function isTeamInboxEnabled(): boolean {
   return (process.env.TEAM_INBOX_MODE || "").trim().toLowerCase() !== "off";
 }
 
-export const TEAM_INBOX_PRIMARY_GRACE_MINUTES =10;
+/** Time reserved for the scheduled responder before coverage may reply. */
+export const TEAM_INBOX_PRIMARY_GRACE_MINUTES = 10;
 
 export type SupportMode = "old" | "ai";
 
