@@ -192,7 +192,7 @@ If `CRON_SECRET` is not set in Vercel, the endpoint is open; otherwise pass it a
 
 Set `SUPPORT_MODE=old` to keep keyword-triggered in-group support ticket creation. Set `SUPPORT_MODE=ai` to classify every non-registered group message throughthe AI support flow instead. Both modes now record support tickets silently in the backend without automatic group replies, and switching the env var does not require a Supabase schema change.
 
-Team inbox: when `TEAM_INBOX_MODE=on` (default), support messages from non-registered users injected `TEAM_STATS_GROUP_CHAT_IDS` are forwarded via DM to every registered team member, who can tap "💬 Reply" and answer in the group with a clickable name signature. Set `TEAM_INBOX_MODE=off` to disable the forwarding without changing `SUPPORT_MODE` or the AI background classification.
+Team inbox: when `TEAM_INBOX_MODE=on` (default), support messages from non-registered users in `TEAM_STATS_GROUP_CHAT_IDS` are forwarded via DM to every registered team member, who can tap "💬 Reply" and answer in the group with a clickable name signature. The inbox sends the complete customer message; messages too long for Telegram's single-message limit continue in additional DMs rather than being shortened. Set `TEAM_INBOX_MODE=off` to disable the forwarding without changing `SUPPORT_MODE` or the AI background classification.
 
 The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the dashboard status for production tracking.
 
