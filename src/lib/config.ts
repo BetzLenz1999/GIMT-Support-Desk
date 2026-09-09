@@ -12,6 +12,10 @@ export function optionalEnv(name: string): string | undefined {
 }
 
 
+export function isTeamInboxEnabled(): boolean {
+  return (process.env.TEAM_INBOX_MODE || "").trim().toLowerCase() !== "off";
+}
+
 export type SupportMode = "old" | "ai";
 
 export function getSupportMode(): SupportMode {

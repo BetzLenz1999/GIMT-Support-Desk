@@ -1,5 +1,5 @@
 import type { GroupActionType, ProofOfWorkSubmission, Registration, SupabaseRestClient, SupportTicket, SupportTicketAttachment } from "./supabase.js";
-import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard } from "./keyboards.js";
+import { dashboardKeyboard, excuseTypeKeyboard, homeKeyboard, proofOfWorkKeyboard, registrationKeyboard, supportReplyKeyboard, swapResponseKeyboard, swapTargetKeyboard, confirmAbsentKeyboard } from "./keyboards.js";
 import {
   clearConversationState,
   createActivity,
@@ -35,6 +35,7 @@ import {
 } from "./repository.js";
 import {
   clearGroupActionMessages,
+  getStatsGroupChatIds,
   getTeamGroupChatId,
   isStatsGroupEnabled,
   rememberTeamGroupChatId,
@@ -42,9 +43,9 @@ import {
   sendTeamGroupMessageWithResult
 } from "./group-notifications.js";
 import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.js";
-import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getChatMember, getFile, sendMessage } from "./telegram.js";
+import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getChatMember, getFile, sendMessage, type SentTelegramMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
-import { getSupportMode } from "./config.js";
+import { getSupportMode, isTeamInboxEnabled } from "./config.js";
 import { detectAiSupportTemplate, type AiSupportDashboardStatus, type AiSupportMatch } from "./ai-support.js";
 import { EARLY_TIME_IN_GRACE_MINUTES, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, isTooEarlyToTimeIn, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -189,6 +190,7 @@ async function trackGroupMessage(
     }
 
     const messageText = message.text?.trim() ?? "";
+    const supportText = messageText || message.caption?.trim() || "";
     const isSlashCommand = messageText.startsWith("/");
 
     if (isSlashCommand) {
@@ -239,7 +241,14 @@ async function trackGroupMessage(
       return;
     }
 
-    await openSupportTicket(db, message, user);
+    if (isSupportTicketOpeningText(supportText)) {
+      await openSupportTicket(db, message, user);
+      return;
+    }
+
+    console.info(
+      `Ignoring non-support message from unregistered user ${user.id} in chat ${message.chat.id}. No support ticket opened.`
+    );
     return;
   }
 
@@ -702,6 +711,242 @@ async function recordCustomerTicketFollowUp(
   }
 
   await removePreviousTicketBotPrompts(db, currentTicket, message.chat.id);
+  await notifyTeamMembersOfSupportMessage(db, currentTicket, supportMessageText(message));
+}
+function isTeamInboxTargetChat(chatId: number): boolean {
+  try {
+    if (getStatsGroupChatIds().includes(chatId)) return true;
+  } catch (error) {
+    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS in team inbox target check", error);
+  }
+  try {
+    return getTeamGroupChatId() === chatId;
+  } catch (error) {
+    console.error("Invalid TEAM_GROUP_CHAT_ID in team inbox target check", error);
+    return false;
+  }
+}
+
+async function notifyTeamMembersOfSupportMessage(
+  db: SupabaseRestClient,
+  ticket: SupportTicket,
+  followUpText?: string
+): Promise<void> {
+  if (!isTeamInboxEnabled()) return;
+  if (!isTeamInboxTargetChat(ticket.telegram_chat_id)) return;
+
+  const registrations = await listRegistrations(db);
+  if (registrations.length === 0) return;
+
+  const header = followUpText
+    ? `📩 <b>New follow-up from ${escapeHtmlForMention(ticket.opened_by_name)}</b>\n\n`
+    : `📩 <b>New support message from ${escapeHtmlForMention(ticket.opened_by_name)}</b>\n\n`;
+  const messagePreview = escapeHtmlForMention(truncateMessage(followUpText ?? ticket.opened_message_text, 200));
+  const notification =
+    header +
+    `Group: ${escapeHtmlForMention(ticket.group_title ?? String(ticket.telegram_chat_id))}\n` +
+    `Message: “${messagePreview}”`;
+
+  for (const memberRegistration of registrations) {
+    const dmChatId = memberRegistration.telegram_chat_id ?? memberRegistration.telegram_user_id;
+    try {
+      await sendMessage(
+        dmChatId,
+        notification,
+        { parseMode: "HTML", replyMarkup: supportReplyKeyboard(ticket.id) }
+      );
+    } catch (error) {
+      console.warn(
+        `Could not notify ${memberRegistration.member_name} (${dmChatId}) about support ticket ${ticket.id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+}
+
+async function handleSupportReplyCallback(
+  db: SupabaseRestClient,
+  callback: TelegramCallbackQuery,
+  chatId: number,
+  messageId: number
+): Promise<void> {
+  const ticketId = callback.data?.split(":").slice(2).join(":") ?? "";
+  if (!ticketId) {
+    await answerCallbackQuery(callback.id);
+    return;
+  }
+
+  const ticket = await findSupportTicketById(db, ticketId);
+  if (!ticket || isTicketClosed(ticket)) {
+
+    await answerCallbackQuery(
+      callback.id,
+      ticket ? "This support ticket is already closed." : "Support ticket not found.",
+      { showAlert: true }
+    );
+    return;
+  }
+
+  const registration = await findRegistrationByUser(db, callback.from.id);
+  if (!registration) {
+    await answerCallbackQuery(callback.id, "Only registered team members can reply to support messages.", { showAlert: true });
+    return;
+  }
+
+  await answerCallbackQuery(callback.id, "Type your reply below. The bot will post it in the group with your name signature.");
+
+  const groupTitle = ticket.group_title ?? String(ticket.telegram_chat_id);
+  const customerName = ticket.opened_by_name;
+
+  await setConversationState(db, callback.from.id, "awaiting_support_reply", {
+    ticketId: ticket.id,
+    telegramChatId: ticket.telegram_chat_id,
+    chatTitle: groupTitle,
+    customerName
+  });
+
+  await editMessageText(
+    chatId,
+    messageId,
+    `📩 ${customerName} asked in ${groupTitle}:\n“${escapeHtmlForMention(truncateMessage(ticket.opened_message_text,120))}”\n\nType your reply below. It will be posted in the group with your name signature.`,
+    { replyMarkup: homeKeyboard() }
+  );
+}
+
+function truncateMessage(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+async function handleSupportReplyMessage(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  registration: Registration,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const ticketId = String(payload.ticketId ?? "");
+  const chatId = Number(payload.telegramChatId ?? NaN);
+  const ticket = ticketId ? await findSupportTicketById(db, ticketId) : null;
+  if (!ticket || isTicketClosed(ticket) || !Number.isSafeInteger(chatId)) {
+
+    await clearConversationState(db, registration.telegram_user_id);
+    await sendMessage(
+      message.chat.id,
+      "This support ticket is no longer active, so the reply was not posted in the group.",
+      { replyMarkup: dashboardKeyboard() }
+    );
+    return;
+  }
+
+  const replyText = message.text?.trim() || message.caption?.trim() || "";
+  if (!replyText) {
+
+    await sendMessage(
+      message.chat.id,
+      "Please send a text reply for the support conversation. I can only post text replies in the group for now.",
+      { replyMarkup: homeKeyboard() }
+    );
+    return;
+  }
+
+  await clearConversationState(db, registration.telegram_user_id);
+
+  const messageDate = message.date ? new Date(message.date * 1000) : new Date();
+  const supportMention = buildSupportMention(registration);
+
+  const reply = await postSupportReplyAsBot(
+    db,
+    ticket,
+    registration,
+    { chatId, text: replyText, mention: supportMention, sentAt: messageDate }
+  );
+
+  if (!reply) {
+
+    await sendMessage(
+      message.chat.id,
+      "I couldn't post the reply in the group. Please try again later.",
+      { replyMarkup: dashboardKeyboard() }
+    );
+    return;
+  }
+
+  await sendMessage(
+    message.chat.id,
+    "✅ Your reply was posted in the group with your name signature.",
+    { replyMarkup: dashboardKeyboard() }
+  );
+}
+
+function buildSupportMention(registration: Registration): string {
+  const displayName = escapeHtmlForMention(registration.member_name);
+  if (registration.telegram_username?.trim()) {
+    return `@${escapeHtmlForMention(registration.telegram_username.trim())} (${displayName})`;
+  }
+  return `<a href="tg://user?id=${registration.telegram_user_id}">${displayName}</a>`;
+}
+
+async function postSupportReplyAsBot(
+  db: SupabaseRestClient,
+  ticket: SupportTicket,
+  registration: Registration,
+  input: {
+    chatId: number;
+
+    text: string;
+    mention: string;
+    sentAt: Date
+  }
+): Promise<SentTelegramMessage | null> {
+
+  const replyBody = `📩 ${escapeHtmlForMention(input.text)}\n\n— ${input.mention}`;
+
+  try {
+    const sent = await sendMessage(input.chatId, replyBody, {
+      parseMode: "HTML",
+      replyToMessageId: ticket.opened_message_id
+    });
+
+    await recordSupportTicketMessage(db, {
+      ticket_id: ticket.id,
+      telegram_chat_id: input.chatId,
+      telegram_message_id: sent.message_id,
+      reply_to_message_id: ticket.opened_message_id,
+      telegram_user_id: registration.telegram_user_id,
+      sender_name: registration.member_name,
+      sender_type: "team_member",
+      message_text: replyBody,
+      message_date_utc: input.sentAt.toISOString()
+    });
+
+    await recordSupportTicketEvent(db, {
+      ticket_id: ticket.id,
+      event_type: "support_reply_posted",
+      actor_telegram_user_id: registration.telegram_user_id,
+      actor_name: registration.member_name,
+      actor_type: "team_member",
+      telegram_chat_id: input.chatId,
+      telegram_message_id: sent.message_id,
+      metadata: { replyText: input.text, repliedToMessageId: ticket.opened_message_id }
+    });
+
+    if (!ticket.assigned_member_id) {
+      try {
+        await connectTicketToTeamMember(db, ticket, registration, {
+          chatId: input.chatId,
+          telegramMessageId: sent.message_id,
+          replyToMessageId: ticket.opened_message_id,
+          eventType: "ticket_accepted"
+        });
+      } catch (connectError) {
+        console.warn(`Could not connect support reply to team member: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+      }
+    }
+
+    return sent;
+  } catch (error) {
+    console.error(`Failed to post support reply for ticket ${ticket.id}and chat ${input.chatId}:`, error);
+    return null;
+  }
 }
 
 type Saver = Pick<Registration, "telegram_user_id" | "member_id" | "member_name">;
@@ -1043,6 +1288,7 @@ async function openSupportTicket(
     metadata: { groupTitle: message.chat.title ?? null, concern: concernText, attachments }
   });
 
+  await notifyTeamMembersOfSupportMessage(db, ticket);
 }
 
 
@@ -1129,6 +1375,7 @@ async function handleAiSupportMessage(
     metadata: { ...aiSupportMetadata(match), originalQuestion: originalText, attachments }
   });
 
+  await notifyTeamMembersOfSupportMessage(db, ticket);
 }
 
 async function handleAiSupportTicketFollowUp(
@@ -1175,6 +1422,7 @@ async function handleAiSupportTicketFollowUp(
   });
 
   await removePreviousTicketBotPrompts(db, updatedTicket, message.chat.id);
+  await notifyTeamMembersOfSupportMessage(db, updatedTicket, supportMessageText(message));
 }
 
 async function handleAiSupportCallback(db: SupabaseRestClient, callback: TelegramCallbackQuery): Promise<void> {
@@ -1375,13 +1623,14 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
     data.startsWith("group:time:in:") || data.startsWith("group:time:out:");
   const isTicketCallback = data.startsWith("t:");
   const isAiSupportCallback = data.startsWith("ai:");
+  const isSupportReplyCallback = data.startsWith("support:reply:");
   const isRegistrationCallback = data.startsWith("register:");
-  if (!isGroupActionCallback && !isTicketCallback && !isAiSupportCallback && !isRegistrationCallback) {
+  if (!isGroupActionCallback && !isTicketCallback && !isAiSupportCallback && !isSupportReplyCallback && !isRegistrationCallback) {
     await answerCallbackQuery(callback.id);
   }
 
   if (!chatId || !messageId) {
-    if (isGroupActionCallback || isTicketCallback || isAiSupportCallback || isRegistrationCallback) await answerCallbackQuery(callback.id);
+    if (isGroupActionCallback || isTicketCallback || isAiSupportCallback || isSupportReplyCallback || isRegistrationCallback) await answerCallbackQuery(callback.id);
     return;
   }
 
@@ -1432,6 +1681,11 @@ async function handleCallback(db: SupabaseRestClient, callback: TelegramCallback
       chatId,
       `📩 ${name}, please continue in my private chat (DM), not here in the group.\n\nFor proof of work submission:\n1. Tap my profile above → “Send Message” (or send me /start in DM)\n2. In DM, tap “📎 Submit Proof”\n3. Send your proof there.`
     );
+    return;
+  }
+
+  if (isSupportReplyCallback) {
+    await handleSupportReplyCallback(db, callback, chatId, messageId);
     return;
   }
 
@@ -1595,6 +1849,11 @@ async function handleStatefulReply(
   const registration = await findRegistrationByUser(db, user.id);
   if (!registration) {
     await sendMessage(message.chat.id, "Please register first.", { replyMarkup: registrationKeyboard() });
+    return;
+  }
+
+  if (state === "awaiting_support_reply") {
+    await handleSupportReplyMessage(db, message, registration, payload);
     return;
   }
 
