@@ -246,21 +246,11 @@ function buildMemberMention(registration: Pick<Registration, "telegram_username"
   return `<a href="tg://user?id=${registration.telegram_user_id}">${displayName}</a>`;
 }
 
-export async function getSupportIntroTargetChatIds(db: SupabaseRestClient): Promise<number[]> {
-  const chatIds = new Set<number>();
-  for (const id of getStatsGroupChatIds()) chatIds.add(id);
-  let primaryChatId: number | undefined;
-  try {
-    primaryChatId = getTeamGroupChatId();
-  } catch (error) {
-    console.error("Invalid TEAM_GROUP_CHAT_ID in support intro sweep", error);
-  }
-  if (primaryChatId !== undefined) chatIds.add(primaryChatId);
-  if (chatIds.size === 0) {
-    const storedChatId = await getStoredTeamGroupChatId();
-    if (storedChatId !== undefined) chatIds.add(storedChatId);
-  }
-  return [...chatIds];
+export function getSupportIntroTargetChatIds(): number[] {
+  // Support introductions are public-facing messages. Never send them to the
+  // private primary notification group; it may only receive attendance and
+  // reminder notifications through TEAM_GROUP_CHAT_ID.
+  return getStatsGroupChatIds();
 }
 
 export async function sendSupportIntroToGroups(
@@ -268,7 +258,7 @@ export async function sendSupportIntroToGroups(
   registration: Pick<Registration, "telegram_user_id" | "telegram_username" | "member_id" | "member_name">,
   workDateUtc: string
 ): Promise<number> {
-  const chatIds = await getSupportIntroTargetChatIds(db);
+  const chatIds = getSupportIntroTargetChatIds();
   let sent =  ​0;
   for (const chatId of chatIds) {
     const eventKey = `support_intro:${chatId}:${registration.member_id}:${workDateUtc}`;
