@@ -52,6 +52,17 @@ export type ConversationState = {
   updated_at: string;
 };
 
+export type TeamInboxDm = {
+  id: string;
+  ticket_id: string;
+  member_id: string;
+  member_name: string;
+  telegram_user_id: number;
+  dm_chat_id: number;
+  dm_message_id: number;
+  updated_at: string;
+};
+
 export type ProofOfWorkReminder = {
   id: string;
   member_id: string;

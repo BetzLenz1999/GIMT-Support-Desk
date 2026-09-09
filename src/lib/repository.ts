@@ -1,4 +1,4 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TeamInboxDm, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -52,6 +52,52 @@ export async function findRegistrationByMemberId(db: SupabaseRestClient, memberI
 
 export async function listRegistrations(db: SupabaseRestClient): Promise<Registration[]> {
   return db.select<Registration>("team_registrations");
+}
+
+export async function findTeamInboxDm(
+  db: SupabaseRestClient,
+  ticketId: string,
+  memberId: string
+): Promise<TeamInboxDm | null> {
+  const rows = await db.select<TeamInboxDm>(
+    "team_inbox_dms",
+    params(eq("ticket_id", ticketId), eq("member_id", memberId), limit(1))
+  );
+  return rows[0] ?? null;
+}
+
+export async function upsertTeamInboxDm(
+  db: SupabaseRestClient,
+  input: {
+    ticket_id: string;
+    member_id: string;
+    member_name: string;
+    telegram_user_id: number;
+    dm_chat_id: number;
+    dm_message_id: number;
+  }
+): Promise<TeamInboxDm> {
+  const rows = await db.upsert<TeamInboxDm>(
+    "team_inbox_dms",
+    {
+      ticket_id: input.ticket_id,
+      member_id: input.member_id,
+      member_name: input.member_name,
+      telegram_user_id: input.telegram_user_id,
+      dm_chat_id: input.dm_chat_id,
+      dm_message_id: input.dm_message_id,
+      updated_at: new Date().toISOString()
+    },
+    "ticket_id,member_id"
+  );
+  return single(rows);
+}
+
+export async function listTeamInboxDmsByTicket(
+  db: SupabaseRestClient,
+  ticketId: string
+): Promise<TeamInboxDm[]> {
+  return db.select<TeamInboxDm>("team_inbox_dms", params(eq("ticket_id", ticketId)));
 }
 
 export async function upsertSavedCommand(
