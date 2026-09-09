@@ -807,7 +807,10 @@ async function notifyTeamMembersOfSupportMessage(
   const primaryTimedIn = primaryMember ? await isPrimaryTimedIn(db, primaryMember) : false;
   const now = new Date();
   const graceEndMs = new Date(ticket.created_at).getTime() + TEAM_INBOX_PRIMARY_GRACE_MINUTES * 60 * 1000;
-   const canTemporaryAssist = !primaryMember || !primaryTimedIn ? true : now.getTime() > graceEndMs;
+  // The scheduled responder gets the full grace period even when they have not
+  // timed in yet. Attendance is not a substitute for giving that responder the
+  // first opportunity to answer a newly opened customer request.
+  const canTemporaryAssist = !primaryMember || now.getTime() > graceEndMs;
 
   const header = followUpText
     ? `📩 <b>New follow-up from ${escapeHtmlForMention(ticket.opened_by_name)}</b>\n\n`
@@ -951,9 +954,8 @@ async function getReplyEligibility(
   const primaryMember = await getTicketPrimaryMember(db, ticket);
   const primaryTimedIn = primaryMember ? await isPrimaryTimedIn(db, primaryMember) : false;
 
-  if (primaryMember && primaryTimedIn) {
-
-    const isPrimary = ticket.assigned_member_id === registration.member_id || (!ticket.assigned_member_id && primaryMember.id === registration.member_id);
+  if (primaryMember) {
+    const isPrimary = primaryMember.id === registration.member_id;
 
     if (isPrimary) {
       return { allowed: true, primary: true, temporaryAssist: false, primaryMember, primaryTimedIn };
@@ -973,23 +975,21 @@ async function getReplyEligibility(
       };
     }
 
-    return { allowed: true, primary: false,temporaryAssist: true, primaryMember, primaryTimedIn };
+    return { allowed: true, primary: false, temporaryAssist: true, primaryMember, primaryTimedIn };
   }
 
-    if (ticket.assigned_member_id && ticket.assigned_member_id !== registration.member_id) {
+  if (ticket.assigned_member_id && ticket.assigned_member_id !== registration.member_id) {
+    return {
+      allowed: false,
+      primary: false,
+      temporaryAssist: false,
+      primaryMember,
+      primaryTimedIn,
+      reason: `Si ${escapeHtmlForMention(ticket.assigned_member_name ?? ticket.assigned_member_id)} na ang humahawak ng ticket na ito.`
+    };
+  }
 
-      return {
-        allowed: false,
-        primary: false,
-        temporaryAssist: false,
-        primaryMember,
-        primaryTimedIn,
-        reason: `Si ${escapeHtmlForMention(ticket.assigned_member_name ?? ticket.assigned_member_id)} na ang humahawak ng ticket na ito.`
-      };
-    }
-
-
-    return { allowed: true, primary: false,temporaryAssist: false, primaryMember, primaryTimedIn };
+  return { allowed: true, primary: false, temporaryAssist: false, primaryMember, primaryTimedIn };
 }
  
 async function handleSupportReplyCallback(
@@ -1576,6 +1576,12 @@ async function handleAiSupportMessage(
   const messageDate = message.date ? new Date(message.date * 1000) : new Date();
   const originalText = supportMessageText(message);
   const match = detectAiSupportTemplate(originalText, Boolean(message.photo?.length));
+  const scheduledMember = findScheduledMemberAt(messageDate);
+  const scheduledRegistration = scheduledMember ? await findRegistrationByMemberId(db, scheduledMember.id) : null;
+  const scheduledMemberIsActive = scheduledMember && scheduledRegistration
+    ? await isRegistrationTimedIn(db, scheduledRegistration, scheduledMember)
+    : false;
+  const acceptedAt = scheduledMemberIsActive ? new Date().toISOString() : null;
   const ticket = await createSupportTicketWithCode(db, {
     telegram_chat_id: message.chat.id,
     group_title: message.chat.title ?? null,
@@ -1583,17 +1589,17 @@ async function handleAiSupportMessage(
     opened_by_name: openedByName,
     opened_message_id: message.message_id,
     opened_message_text: aiSupportConcernText(originalText, match),
-    status: "open",
-    assigned_member_id: null,
-    assigned_member_name: null,
-    scheduled_member_id: null,
-    scheduled_member_name: null,
-    accepted_by_telegram_user_id: null,
-    accepted_member_was_timed_in: null,
-    accepted_during_own_shift: null,
+    status: scheduledMemberIsActive ? "accepted" : "open",
+    assigned_member_id: scheduledMemberIsActive ? scheduledMember?.id ?? null : null,
+    assigned_member_name: scheduledMemberIsActive ? scheduledMember?.name ?? null : null,
+    scheduled_member_id: scheduledMember?.id ?? null,
+    scheduled_member_name: scheduledMember?.name ?? null,
+    accepted_by_telegram_user_id: scheduledMemberIsActive ? scheduledRegistration?.telegram_user_id ?? null : null,
+    accepted_member_was_timed_in: scheduledMemberIsActive ? true : null,
+    accepted_during_own_shift: scheduledMemberIsActive && scheduledMember ? isMemberScheduledAt(scheduledMember, messageDate) : null,
     covered_for_member_id: null,
     covered_for_member_name: null,
-    accepted_at: null,
+    accepted_at: acceptedAt,
     resolution_requested_at: null,
     resolved_by_telegram_user_id: null,
     resolution: null,
