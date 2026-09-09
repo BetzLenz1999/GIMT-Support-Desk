@@ -359,3 +359,18 @@ alter table if exists public.proof_of_work_submissions
   add constraint proof_of_work_submissions_proof_type_check check (proof_type in ('link', 'text', 'mixed', 'screenshot'));
 
 create index if not exists proof_of_work_submissions_media_group_idx on public.proof_of_work_submissions(telegram_user_id, source_media_group_id) where source_media_group_id is not null;
+
+-- Team inbox DM tracking: keeps one per (ticket, member), updated in place so members always see the latest support conversation state.
+create table if not exists public.team_inbox_dms (
+  id uuid primary key default gen_random_uuid(),
+  ticket_id uuid not null references public.support_tickets(id) on delete cascade,
+  member_id text not null,
+  member_name text not null,
+  telegram_user_id bigint not null,
+  dm_chat_id bigint not null,
+  dm_message_id bigint not null,
+  updated_at timestamptz not null default now(),
+  unique (ticket_id, member_id)
+);
+
+create index if not exists team_inbox_dms_member_idx on public.team_inbox_dms(telegram_user_id);
