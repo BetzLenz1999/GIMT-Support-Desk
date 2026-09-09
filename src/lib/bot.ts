@@ -812,26 +812,26 @@ async function notifyTeamMembersOfSupportMessage(
   const header = followUpText
     ? `📩 <b>New follow-up from ${escapeHtmlForMention(ticket.opened_by_name)}</b>\n\n`
     : `📩 <b>New support message from ${escapeHtmlForMention(ticket.opened_by_name)}</b>\n\n`;
-  const messagePreview = escapeHtmlForMention(truncateMessage(followUpText ?? ticket.opened_message_text, 200));
   const eligibilityNote =
     !primaryMember
       ? ""
       : canTemporaryAssist
         ? `\n\n🛟 Temporary assistant window is open — ${escapeHtmlForMention(primaryMember.name)} has not replied within ${TEAM_INBOX_PRIMARY_GRACE_MINUTES} minutes.`
         : `\n\n⏳ ${escapeHtmlForMention(primaryMember.name)} is the scheduled responder for this ticket.You can reply as temporary assistant after ${TEAM_INBOX_PRIMARY_GRACE_MINUTES} minutes.`;
-  const notification =
+  const messageText = followUpText ?? ticket.opened_message_text;
+  const notificationPrefix =
     header +
-    `Group: ${escapeHtmlForMention(ticket.group_title ?? String(ticket.telegram_chat_id))}\n` +
-    `Message: “${messagePreview}”` +
-    eligibilityNote;
+    `Group: ${escapeHtmlForMention(ticket.group_title ?? String(ticket.telegram_chat_id))}\n`;
 
   for (const memberRegistration of registrations) {
     const dmChatId = memberRegistration.telegram_chat_id ?? memberRegistration.telegram_user_id;
     try {
-      const sent = await sendMessage(
+      const sent = await sendCompleteTeamInboxMessage(
         dmChatId,
-        notification,
-        { parseMode: "HTML", replyMarkup: supportReplyKeyboard(ticket.id) }
+        notificationPrefix,
+        messageText,
+        eligibilityNote,
+        supportReplyKeyboard(ticket.id)
       );
       await upsertTeamInboxDm(db, {
         ticket_id: ticket.id,
@@ -883,6 +883,64 @@ async function pushTeamInboxUpdate(
 function truncateMessage(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1)}…`;
+}
+
+const TELEGRAM_MESSAGE_MAX_LENGTH = 4096;
+
+/**
+ * Sends every character of a customer message to the team inbox. Telegram limits
+ * a single message to 4096 characters, so long source messages are continued in
+ * additional DMs rather than being shortened to a preview.
+ */
+async function sendCompleteTeamInboxMessage(
+  chatId: number,
+  prefix: string,
+  messageText: string,
+  suffix: string,
+  replyMarkup: ReturnType<typeof supportReplyKeyboard>
+): Promise<SentTelegramMessage> {
+  const firstMessagePrefix = `${prefix}Message: “`;
+  const continuationPrefix = "Message (continued): “";
+  const closingQuote = "”";
+  const chunks = splitTelegramText(messageText, firstMessagePrefix.length + closingQuote.length + suffix.length, continuationPrefix.length + closingQuote.length);
+
+  let firstSent: SentTelegramMessage | null = null;
+  for (const [index, chunk] of chunks.entries()) {
+    const isFirst = index === 0;
+    const isLast = index === chunks.length - 1;
+    const text =
+      `${isFirst ? firstMessagePrefix : continuationPrefix}${escapeHtmlForMention(chunk)}${closingQuote}` +
+      (isLast ? suffix : "");
+    const sent = await sendMessage(chatId, text, {
+      parseMode: "HTML",
+      ...(isFirst ? { replyMarkup } : {})
+    });
+    if (isFirst) firstSent = sent;
+  }
+
+  if (!firstSent) throw new Error("Team inbox notification did not produce a message.");
+  return firstSent;
+}
+
+function splitTelegramText(text: string, firstMessageOverhead: number, continuationMessageOverhead: number): string[] {
+  const firstChunkLength = TELEGRAM_MESSAGE_MAX_LENGTH - firstMessageOverhead;
+  const continuationChunkLength = TELEGRAM_MESSAGE_MAX_LENGTH - continuationMessageOverhead;
+  if (firstChunkLength < 1 || continuationChunkLength < 1) {
+    throw new Error("Team inbox notification header is too long for Telegram.");
+  }
+
+  const characters = Array.from(text);
+  if (characters.length === 0) return [""];
+
+  const chunks: string[] = [];
+  let offset = 0;
+  let chunkLength = firstChunkLength;
+  while (offset < characters.length) {
+    chunks.push(characters.slice(offset, offset + chunkLength).join(""));
+    offset += chunkLength;
+    chunkLength = continuationChunkLength;
+  }
+  return chunks;
 }
 
 async function getReplyEligibility(
