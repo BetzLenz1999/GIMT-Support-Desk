@@ -36,9 +36,6 @@ TEAM_GROUP_CHAT_ID=
 TEAM_STATS_GROUP_CHAT_IDS=
 # Optional support flow switch: old or ai
 SUPPORT_MODE=old
-# Optional team inbox: when on, non-user group support messages are DM'd to
-# all registered team members so they can reply via the bot (with a clickable name signature).
-TEAM_INBOX_MODE=off
 ```
 
 `SUPABASE_ANON_KEY` is supported only as a fallback, but `SUPABASE_SERVICE_ROLE_KEY` is recommended because the bot runs server-side and performs trusted writes.
@@ -199,40 +196,8 @@ The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket
 
 In `ai` mode, non-registered group users are classified silently in the backend for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, importing wallets/G$ tokens, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. The bot no longer posts AI support responses or solved/not-solved buttons in the group chat; it records the ticket, category metadata, attachments, and events so moderators can review the conversation in the dashboard.
 
-The support dashboard also enriches each ticket with moderator-assist insights computed from the ticket history: a short conversation summary, suggested next action, evidence checklist, risk flags, and language/translation assist for common non-English messages. The support-ticket API returns `issue_stats` so the Support Ticketsand Ticket Search views can show repeated issue counts by category, including open/needs-moderator/closed totals for the current filters. Bot-authored support messages are filtered out of the dashboard conversation view. These insights are generated from existing ticket rows and do not require extra Supabase tables.
+The support dashboard also enriches each ticket with moderator-assist insights computed from the ticket history: a short conversation summary, suggested next action, evidence checklist, risk flags, and language/translation assist for common non-English messages. The support-ticket API returns `issue_stats` so the Support Tickets and Ticket Search views can show repeated issue counts by category, including open/needs-moderator/closed totals for the current filters. Bot-authored support messages are filtered out of the dashboard conversation view. These insights are generated from existing ticket rows and do not require extra Supabase tables.
 
-
-
-## Team inbox (reply to support messages from the bot)
-
-Set `TEAM_INBOX_MODE=on` to turn on the team inbox. When enabled, anytime a non-registered group user sends a support-style message in a tracked group (any group listed in `TEAM_STATS_GROUP_CHAT_IDS`, or the primary team group in `TEAM_GROUP_CHAT_ID`),the bot DM's every registered team member:
-
-```text
-📩 New support message from Juan
-Group: GIMT
-Message:“hi”
-[💬 Reply]
-```
-
-Tapping **💬 Reply** switches the member's DM INTO a reply editor. The member types their answer, and the bot posts it back in the group as a reply to the original customer message:
-
-```text
-📩 How can I help you?
-
-— Betz
-```
-
-The member name is rendered as a clickable mention (when they have a Telegram username it shows `@username (Betz)`; otherwise it is a `tg://user?id=...` link) so the community can see who is helping them. The conversation stays recorded in the same `support_tickets` tables with the responder stored as the assigned member for dashboard audit.
-
-Behavior notes:
-
-- Notifications only fire for chats configured in `TEAM_STATS_GROUP_CHAT_IDS` or the primary `TEAM_GROUP_CHAT_ID`, so the bot can sit in other groups without alerting the team.
-- The toggle is off by default, so existing deployments behave exactly as before unless you turn it on.
-- All registered team members receive the DM alert and any of them can reply (there is no assignment lock). The first member to reply becomes the ticket's assigned member.
-- Follow-up messages from the same customer in an active ticket also DM the team so nobody misses the thread.
-- Text replies are supported; photos, links, and notes are recorded in the ticket but are not reposted in the group.
-- If the ticket is already closed when a member taps Reply, the bot tells them so and does not repost anything.
-- No schema change is required;the flow reuses the existing `support_tickets`, `support_ticket_messages`,and `support_ticket_events` tables.
 ## In-group support ticket workflow
 
 The bot can open lightweight support tickets directly inside Telegram groups without mixing that history into attendance, activity, or proof-of-work records. When a non-registered group participant sends a support-style text such as `/support`, `/ticket`, `help`, `hello`, `hi`, `complaint`, `issue`, `problem`, or `not working`, the bot creates a row in `public.support_tickets`, records the opening message in `public.support_ticket_messages`, and records a `ticket_opened` event in `public.support_ticket_events` without posting an automatic support reply in the group.
