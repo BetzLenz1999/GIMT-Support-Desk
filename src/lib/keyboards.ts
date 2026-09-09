@@ -143,9 +143,3 @@ export function aiSupportResolutionKeyboard(ticketId: string): InlineKeyboardMar
     ]]
   };
 }
-
-export function supportReplyKeyboard(ticketId: string): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [[{ text: "💬 Reply", callback_data: `support:reply:${ticketId}` }]]
-  };
-}
