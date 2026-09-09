@@ -1,7 +1,6 @@
 import type { TeamMember } from "./team-schedule.js";
 
 export const GRACE_PERIOD_MINUTES = 5;
-export const EARLY_TIME_IN_GRACE_MINUTES = 15;
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -119,12 +118,13 @@ export function calculateLateMinutes(scheduledStart: Date, actualIn: Date): numb
   return Math.max(0, lateMinutes);
 }
 
-export function isTooEarlyToTimeIn(
-  scheduledStart: Date,
-  now: Date,
-  graceMinutes: number = EARLY_TIME_IN_GRACE_MINUTES
-): boolean {
-  return signedMinutesBetween(now, scheduledStart) > graceMinutes;
+/**
+ * Attendance actions open at their scheduled UTC time. Keeping this check in
+ * the shared time module makes the DM and group action paths enforce the same
+ * boundary.
+ */
+export function isBeforeScheduledTime(scheduledTime: Date, now: Date): boolean {
+  return now.getTime() < scheduledTime.getTime();
 }
 
 export function calculateEarlyOutMinutes(scheduledEnd: Date, actualOut: Date): number {
