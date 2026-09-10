@@ -144,8 +144,8 @@ export function aiSupportResolutionKeyboard(ticketId: string): InlineKeyboardMar
   };
 }
 
-export function supportReplyKeyboard(ticketId: string): InlineKeyboardMarkup {
+export function supportReplyKeyboard(ticketId: string, customerMessageId: number): InlineKeyboardMarkup {
   return {
-    inline_keyboard: [[{ text: "💬 Reply", callback_data: `support:reply:${ticketId}` }]]
+    inline_keyboard: [[{ text: "💬 Reply", callback_data: `support:reply:${ticketId}:${customerMessageId}` }]]
   };
 }

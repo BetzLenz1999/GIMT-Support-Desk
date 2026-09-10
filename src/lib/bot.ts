@@ -804,6 +804,8 @@ async function notifyTeamMembersOfSupportMessage(
   if (!isTeamInboxTargetChat(ticket.telegram_chat_id)) return;
 
   const registrations = await listRegistrations(db);
+  const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
+  const sourceCustomerMessageId = latestCustomerMessage?.telegram_message_id ?? ticket.opened_message_id;
 
   if (replyUpdate) {
     const dms = await listTeamInboxDmsByTicket(db, ticket.id);
@@ -823,7 +825,10 @@ async function notifyTeamMembersOfSupportMessage(
           dmChatId,
           existingDm.dm_message_id,
           updatedText,
-          { parseMode: "HTML", replyMarkup: supportReplyKeyboard(ticket.id) }
+          {
+            parseMode: "HTML",
+            replyMarkup: supportReplyKeyboard(ticket.id, existingDm.source_telegram_message_id ?? sourceCustomerMessageId)
+          }
         );
       } catch (error) {
         console.warn(
@@ -865,7 +870,7 @@ async function notifyTeamMembersOfSupportMessage(
         notificationPrefix,
         messageText,
         eligibilityNote,
-        supportReplyKeyboard(ticket.id)
+        supportReplyKeyboard(ticket.id, sourceCustomerMessageId)
       );
       await upsertTeamInboxDm(db, {
         ticket_id: ticket.id,
@@ -873,7 +878,8 @@ async function notifyTeamMembersOfSupportMessage(
         member_name: memberRegistration.member_name,
         telegram_user_id: memberRegistration.telegram_user_id,
         dm_chat_id: dmChatId,
-        dm_message_id: sent.message_id
+        dm_message_id: sent.message_id,
+        source_telegram_message_id: sourceCustomerMessageId
       });
     } catch (error) {
       console.warn(
@@ -889,7 +895,7 @@ async function pushTeamInboxUpdate(
     registration: Registration;
     dmChatId: number;
     ticket: SupportTicket;
-    existingDm: { dm_message_id: number };
+    existingDm: { dm_message_id: number; source_telegram_message_id?: number | null };
     text: string;
     reply?: { replierName: string; replyText: string; badge?: string }
   }
@@ -906,7 +912,10 @@ async function pushTeamInboxUpdate(
       existingDm.dm_message_id,
 
       `${text}${attachmentNote}${badgeNote}`,
-      { parseMode: "HTML", replyMarkup: supportReplyKeyboard(ticket.id) }
+      {
+        parseMode: "HTML",
+        replyMarkup: supportReplyKeyboard(ticket.id, existingDm.source_telegram_message_id ?? ticket.opened_message_id)
+      }
     );
   } catch (error) {
     console.warn(
@@ -1029,7 +1038,8 @@ async function handleSupportReplyCallback(
   chatId: number,
   messageId: number
 ): Promise<void> {
-  const ticketId = callback.data?.split(":").slice(2).join(":") ?? "";
+  const [, , ticketId, sourceMessageIdValue] = callback.data?.split(":") ?? [];
+  const sourceMessageId = Number(sourceMessageIdValue);
   if (!ticketId) {
     await answerCallbackQuery(callback.id);
     return;
@@ -1058,15 +1068,20 @@ async function handleSupportReplyCallback(
  
    await answerCallbackQuery(callback.id, "Type your reply below.The bot will post it in the group with your name signature.");
  
-   const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
    const groupTitle = ticket.group_title ?? String(ticket.telegram_chat_id);
    const customerName = ticket.opened_by_name;
+   // Buttons sent before source message IDs were added cannot identify their
+   // original customer message, so retain the previous latest-message fallback.
+   const replyToMessageId = Number.isSafeInteger(sourceMessageId)
+     ? sourceMessageId
+     : (await findLatestCustomerSupportTicketMessage(db, ticket.id))?.telegram_message_id ?? ticket.opened_message_id;
  
    await setConversationState(db, callback.from.id, "awaiting_support_reply", {
      ticketId: ticket.id,
      telegramChatId: ticket.telegram_chat_id,
      chatTitle: groupTitle,
      customerName,
+     replyToMessageId,
      primary: eligibility.primary || false,
      temporaryAssist: eligibility.temporaryAssist || false
    });
@@ -1074,7 +1089,7 @@ async function handleSupportReplyCallback(
    await editMessageText(
      chatId,
      messageId,
-     `📩 Latest message from ${customerName} in ${groupTitle}:\n“${escapeHtmlForMention(truncateMessage(latestCustomerMessage?.message_text ?? ticket.opened_message_text,120))}”\n\nType your reply below. It will be posted as a reply to the latest customer message in the group with your name signature.`,
+     `📩 Replying to ${customerName}'s selected message in ${groupTitle}.\n\nType your reply or send a photo below. The bot will post it as a reply to that selected customer message in the group with your name signature.`,
      { replyMarkup: homeKeyboard() }
    );
  }
@@ -1099,10 +1114,11 @@ async function handleSupportReplyCallback(
    }
 
    const replyText = message.text?.trim() || message.caption?.trim() || "";
-   if (!replyText) {
+   const hasPhoto = Boolean(message.photo?.length);
+   if (!replyText && !hasPhoto) {
      await sendMessage(
        message.chat.id,
-       "Please send a text reply for the support conversation.I can only post text replies in the group for now.",
+       "Please send a text reply or a photo for the support conversation.",
        { replyMarkup: homeKeyboard() }
      );
      return;
@@ -1127,7 +1143,17 @@ async function handleSupportReplyCallback(
      db,
      ticket,
      registration,
-     { chatId, text: replyText, mention: supportMention, sentAt: messageDate, badge: eligibility.temporaryAssist ? eligibility.primaryMember?.name : undefined }
+     {
+       chatId,
+       text: replyText,
+       mention: supportMention,
+       sentAt: messageDate,
+       replyToMessageId: Number(payload.replyToMessageId),
+       sourceChatId: message.chat.id,
+       sourceMessageId: message.message_id,
+       hasPhoto,
+       badge: eligibility.temporaryAssist ? eligibility.primaryMember?.name : undefined
+     }
    );
 
    if (!reply) {
@@ -1139,9 +1165,11 @@ async function handleSupportReplyCallback(
      return;
    }
 
-   await sendMessage(
-     message.chat.id,
-     "✅ Your reply was posted in the group with your name signature.",
+  await sendMessage(
+    message.chat.id,
+    hasPhoto
+      ? "✅ Your photo reply was posted in the group with your name signature."
+      : "✅ Your reply was posted in the group with your name signature.",
      { replyMarkup: dashboardKeyboard() }
    );
  }
@@ -1168,19 +1196,30 @@ async function postSupportReplyAsBot(
     text: string;
     mention: string;
     sentAt: Date;
+    replyToMessageId: number;
+    sourceChatId: number;
+    sourceMessageId: number;
+    hasPhoto: boolean;
     badge?: string
   }
 ): Promise<SentTelegramMessage | null> {
 
   const replyBody = `📩 ${escapeHtmlForMention(input.text)}\n\n— ${input.mention}`;
-  const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
-  const replyToMessageId = latestCustomerMessage?.telegram_message_id ?? ticket.opened_message_id;
+  const replyToMessageId = Number.isSafeInteger(input.replyToMessageId)
+    ? input.replyToMessageId
+    : ticket.opened_message_id;
 
   try {
-    const sent = await sendMessage(input.chatId, replyBody, {
-      parseMode: "HTML",
-      replyToMessageId
-    });
+    const sent = input.hasPhoto
+      ? await copyMessage(input.chatId, input.sourceChatId, input.sourceMessageId, {
+          caption: replyBody,
+          parseMode: "HTML",
+          replyToMessageId
+        })
+      : await sendMessage(input.chatId, replyBody, {
+          parseMode: "HTML",
+          replyToMessageId
+        });
 
     await recordSupportTicketMessage(db, {
       ticket_id: ticket.id,
