@@ -103,8 +103,12 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
     return;
   }
 
+  // Join events come through as service messages (no "from" user)that would
+  // otherwise flow into the regular message path. Send the welcome and stop
+  // there; joining should never open a support ticket or count as a chat message.
   if (isGroupChat(message.chat) && message.new_chat_members?.length) {
     await welcomeNewStatsGroupMembers(db, message);
+    return;
   }
 
   if (isChatIdCommand(command)) {
