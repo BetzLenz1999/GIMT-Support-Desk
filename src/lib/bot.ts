@@ -764,6 +764,10 @@ function isTeamInboxTargetChat(chatId: number): boolean {
   }
 }
 
+// TEMPORARY: only whitelisted members receive team inbox forwards. Set to
+// [] (or remove the filter) to notify every registered team member again..
+const TEAM_INBOX_RECIPIENT_MEMBER_IDS: string[] = ["betz"];
+
 type TeamMemberPreview = { id: string; name: string };
 
 function findTicketPrimaryMember(ticket: SupportTicket): TeamMemberPreview | null {
@@ -808,12 +812,15 @@ async function notifyTeamMembersOfSupportMessage(
   if (!isTeamInboxTargetChat(ticket.telegram_chat_id)) return;
 
   const registrations = await listRegistrations(db);
+  const recipients = TEAM_INBOX_RECIPIENT_MEMBER_IDS.length > 0
+    ? registrations.filter((registration) => TEAM_INBOX_RECIPIENT_MEMBER_IDS.includes(registration.member_id))
+    : registrations;
   const latestCustomerMessage = await findLatestCustomerSupportTicketMessage(db, ticket.id);
   const sourceCustomerMessageId = latestCustomerMessage?.telegram_message_id ?? ticket.opened_message_id;
 
   if (replyUpdate) {
     const dms = await listTeamInboxDmsByTicket(db, ticket.id);
-    for (const memberRegistration of registrations) {
+    for (const memberRegistration of recipients) {
       const dmChatId = memberRegistration.telegram_chat_id ?? memberRegistration.telegram_user_id;
       const existingDm = dms.find((dm) => dm.dm_chat_id === dmChatId && dm.member_id === memberRegistration.member_id);
       if (!existingDm) continue;
@@ -866,7 +873,7 @@ async function notifyTeamMembersOfSupportMessage(
     header +
     `Group: ${escapeHtmlForMention(ticket.group_title ?? String(ticket.telegram_chat_id))}\n`;
 
-  for (const memberRegistration of registrations) {
+  for (const memberRegistration of recipients) {
     const dmChatId = memberRegistration.telegram_chat_id ?? memberRegistration.telegram_user_id;
     try {
       const sent = await sendCompleteTeamInboxMessage(
