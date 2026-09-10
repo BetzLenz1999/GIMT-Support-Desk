@@ -88,20 +88,27 @@ export async function sendMessage(
   });
 }
 
-export type CopiedTelegramMessage = {
-  message_id: number;
+export type CopyMessageOptions = {
+  caption?: string;
+  parseMode?: "HTML" | "MarkdownV2";
+  replyToMessageId?: number;
 };
 
 export async function copyMessage(
   chatId: number,
   fromChatId: number,
-  messageId: number
-): Promise<CopiedTelegramMessage> {
-  return telegramApi<CopiedTelegramMessage>("copyMessage", {
+  messageId: number,
+  options: CopyMessageOptions = {}
+): Promise<SentTelegramMessage> {
+  const copied = await telegramApi<{ message_id: number }>("copyMessage", {
     chat_id: chatId,
     from_chat_id: fromChatId,
-    message_id: messageId
+    message_id: messageId,
+    caption: options.caption,
+    parse_mode: options.parseMode,
+    reply_to_message_id: options.replyToMessageId
   });
+  return { ...copied, chat: { id: chatId } };
 }
 
 export async function deleteMessage(chatId: number, messageId: number): Promise<boolean> {

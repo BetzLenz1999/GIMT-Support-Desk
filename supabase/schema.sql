@@ -374,3 +374,9 @@ create table if not exists public.team_inbox_dms (
 );
 
 create index if not exists team_inbox_dms_member_idx on public.team_inbox_dms(telegram_user_id);
+
+-- Keep the exact customer message represented by each team inbox action.
+-- This makes a moderator reply to the message whose Reply button they chose,
+-- rather than whichever customer message happened to arrive most recently.
+alter table if exists public.team_inbox_dms
+  add column if not exists source_telegram_message_id bigint;

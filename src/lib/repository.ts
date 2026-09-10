@@ -75,6 +75,7 @@ export async function upsertTeamInboxDm(
     telegram_user_id: number;
     dm_chat_id: number;
     dm_message_id: number;
+    source_telegram_message_id: number;
   }
 ): Promise<TeamInboxDm> {
   const rows = await db.upsert<TeamInboxDm>(
@@ -86,6 +87,7 @@ export async function upsertTeamInboxDm(
       telegram_user_id: input.telegram_user_id,
       dm_chat_id: input.dm_chat_id,
       dm_message_id: input.dm_message_id,
+      source_telegram_message_id: input.source_telegram_message_id,
       updated_at: new Date().toISOString()
     },
     "ticket_id,member_id"

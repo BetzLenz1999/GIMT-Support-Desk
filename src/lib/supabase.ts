@@ -60,6 +60,7 @@ export type TeamInboxDm = {
   telegram_user_id: number;
   dm_chat_id: number;
   dm_message_id: number;
+  source_telegram_message_id: number | null;
   updated_at: string;
 };
 
