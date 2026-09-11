@@ -1783,7 +1783,7 @@ async function handleAiSupportCallback(db: SupabaseRestClient, callback: Telegra
     return;
   }
 
-  await answerCallbackQuery(callback.id, "AI resolution buttons are disabled; tickets auto-close after 30 minutes without requester messages.", { showAlert: true });
+  await answerCallbackQuery(callback.id, "AI resolution buttons are disabled; tickets auto-close after 1 hour without requester messages.", { showAlert: true });
   await deleteCallbackMessage(chatId, callback);
   await removePreviousTicketBotPrompts(db, ticket, chatId, { exceptMessageId: callback.message?.message_id });
 }
@@ -1804,13 +1804,13 @@ async function handleTicketCallback(db: SupabaseRestClient, callback: TelegramCa
   }
 
   if (action === "res") {
-    await answerCallbackQuery(callback.id, "Resolution prompts are disabled; tickets auto-close after 30 minutes without requester messages.", { showAlert: true });
+    await answerCallbackQuery(callback.id, "Resolution prompts are disabled; tickets auto-close after 1 hour without requester messages.", { showAlert: true });
     await deleteCallbackMessage(chatId, callback);
     return;
   }
 
   if (action === "sol" || action === "nsol") {
-    await answerCallbackQuery(callback.id, "Solved / Not Solved buttons are disabled; tickets auto-close after 30 minutes without requester messages.", { showAlert: true });
+    await answerCallbackQuery(callback.id, "Solved / Not Solved buttons are disabled; tickets auto-close after 1 hour without requester messages.", { showAlert: true });
     await deleteCallbackMessage(chatId, callback);
     return;
   }

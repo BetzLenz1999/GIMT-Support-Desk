@@ -195,7 +195,7 @@ function buildSummary(ticket: SupportTicket, category: AiSupportCategory, custom
 }
 
 function buildNextAction(ticket: SupportTicket, category: AiSupportCategory, attachmentCount: number): string {
-  if (ticket.status === "expired") return "No action needed; ticket auto-closed after 30 minutes without a requester message.";
+  if (ticket.status === "expired") return "No action needed; ticket auto-closed after 1 hour without a requester message.";
   if (ticket.status === "solved_closed") return "No action needed; requester confirmed solved.";
   if (ticket.status === "not_solved_closed") return "Review as not solved; check history and re-open with a moderator reply if needed.";
   if (ticket.status === "pending_user_resolution" || ticket.status === "pending_follow_up") return "Legacy ticket state; review the conversation and wait for auto-close or a new requester message.";

@@ -28,7 +28,7 @@ const PRE_OUT_MINUTES = 10;
 const PROOF_OF_WORK_REMINDER_MINUTES = 60;
 const LATE_AFTER_MINUTES = 5;
 const MISSING_OUT_AFTER_MINUTES = 5;
-const SUPPORT_TICKET_INACTIVITY_TIMEOUT_MINUTES = 30;
+const SUPPORT_TICKET_INACTIVITY_TIMEOUT_MINUTES = 60;
 const TEAM_ENCOURAGEMENT_UTC_HOUR = 5; // 1:00 PM Philippines time (Asia/Manila, UTC+8, no DST)
 const TEAM_ENCOURAGEMENT_EVENT = "team_encouragement";
 
@@ -525,7 +525,7 @@ async function sweepInactiveSupportTickets(
       telegram_chat_id: ticket.telegram_chat_id,
       telegram_message_id: null,
       metadata: {
-        reason: "No requester message on the active ticket within 30 minutes",
+        reason: "No requester message on the active ticket within 1 hour",
         previousStatus: ticket.status,
         status: updatedTicket.status,
         latestCustomerMessageAt,
