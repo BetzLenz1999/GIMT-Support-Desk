@@ -211,7 +211,7 @@ Backend-only flow:
 3. If the scheduled support member is actively timed in, the ticket is automatically assigned to that member in the backend; otherwise it remains open for a registered support member to handle.
 4. When a registered support member replies to an active ticket thread, the bot records the reply and connects the ticket to that responder in the backend. If a different member handles the ticket during another member's scheduled duty window, the scheduled-duty owner and coverage handoff are still saved for dashboard audit history.
 5. Solved/not-solved resolution prompts are disabled. The dashboard conversation is the source of truth for review.
-6. The timekeeping cron automatically closes active support tickets as `expired` with `closed_at` when the requester has not sent another message on that current ticket for 30 minutes. The bot does not post a group notification for this auto-close.
+6. The timekeeping cron automatically closes active support tickets as `expired` with `closed_at` when the requester has not sent another message on that current ticket for 1 hour. The bot does not post a group notification for this auto-close.
 7. If the requester messages again after that auto-close, there is no active ticket for that user/chat anymore, so the bot creates a new ticket and starts a new backend-only history.
 
 Support ticket history is intentionally independent from attendance and activity history. Non-registered requesters are not counted in team stats, while registered team members’ ordinary group replies can still be counted in `group_message_stats` as normal team activity. The dashboard has a **Support Tickets** tab for reviewing assigned responders, scheduled-duty owners, and off-duty coverage handoffs.
