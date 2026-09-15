@@ -1,4 +1,4 @@
-import { eq, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TeamInboxDm, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, gte, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TeamInboxDm, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -585,6 +585,22 @@ export async function listSupportTicketMessages(
   return db.select<SupportTicketMessage>(
     "support_ticket_messages",
     params(inList("ticket_id", ticketIds), order("message_date_utc", true))
+  );
+}
+
+/** All tickets opened within an inclusive UTC date range (YYYY-MM-DD). */
+export async function listSupportTicketsInRange(
+  db: SupabaseRestClient,
+  fromDateKey: string,
+  toDateKey: string
+): Promise<SupportTicket[]> {
+  return db.select<SupportTicket>(
+    "support_tickets",
+    params(
+      gte("created_at", `${fromDateKey}T00:00:00.000Z`),
+      lte("created_at", `${toDateKey}T23:59:59.999Z`),
+      order("created_at", false)
+    )
   );
 }
 

@@ -148,7 +148,7 @@ After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 1
 
 ### Timekeeping cron schedule
 
-The reminders are only automatic when the host runs the timekeeping cron on a schedule. Vercel uses `vercel.json` to call `/api/cron/timekeeping` every 5 minutes. Netlify uses `netlify.toml` to run the `cron-timekeeping` scheduled function every 5 minutes; after deploy, confirm the function has a **Scheduled** badge in the Netlify Functions page. The daily report cron runs at 01:05 UTC in both hosts.
+The reminders are only automatic when the host runs the timekeeping cron on a schedule. Vercel uses `vercel.json` to call `/api/cron/timekeeping` every 5 minutes. Netlify uses `netlify.toml` to run the `cron-timekeeping` scheduled function every 5 minutes; after deploy, confirm the function has a **Scheduled** badge in the Netlify Functions page. The daily report cron runs at 01:05 UTC in both hosts, and the repeated issue report cron runs at 01:15 UTC.
 
 If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically, including the daily "assistant today" intros in the stats groups.
 
@@ -196,9 +196,51 @@ Team inbox: when `TEAM_INBOX_MODE=on` (default), support messages from non-regis
 
 The `ai` flow uses the existing `public.support_tickets`, `public.support_ticket_messages`, and `public.support_ticket_events` tables only; it does not require a new Supabase table. AI cases are marked in ticket text/event metadata with `supportMode: "ai"`, the detected dashboard category, and the dashboard status for production tracking.
 
-In `ai` mode, non-registered group users are classified silently in the backend for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, importing wallets/G$ tokens, missing rewards, transaction failures, pending follow-ups, screenshots/errors, or unknown issues. The bot no longer posts AI support responses or solved/not-solved buttons in the group chat; it records the ticket, category metadata, attachments, and events so moderators can review the conversation in the dashboard.
+In `ai` mode, non-registered group users are classified silently in the backend for topics such as claiming G$, GoodWallet claiming failures, face verification failures, wallet connection issues, MiniPay GoodDapp swap failures, gas fee issues, importing wallets/G$ tokens, missing rewards, transaction failures, generic failures/errors, pending follow-ups, screenshots/errors, or unknown issues. The bot no longer posts AI support responses or solved/not-solved buttons in the group chat; it records the ticket, category metadata, attachments, and events so moderators can review the conversation in the dashboard.
 
-The support dashboard also enriches each ticket with moderator-assist insights computed from the ticket history: a short conversation summary, suggested next action, evidence checklist, risk flags, and language/translation assist for common non-English messages. The support-ticket API returns `issue_stats` so the Support Tickets and Ticket Search views can show repeated issue counts by category, including open/needs-moderator/closed totals for the current filters. Bot-authored support messages are filtered out of the dashboard conversation view. These insights are generated from existing ticket rows and do not require extra Supabase tables.
+The support dashboard also enriches each ticket with moderator-assist insights computed from the ticket history: a short conversation summary, suggested next action, evidence checklist, risk flags, and language/translation assist for common non-English messages. The support-ticket API returns `issue_stats` so the Support Tickets and Ticket Search views can show repeated issue counts by category, including open/needs-moderator/closed totals for the current filters. Each issue also carries its own report period (`period_from`/`period_to`) and a `daily_counts` breakdown, so the panel shows both the total reports and the exact date range the issue spans. Bot-authored support messages are filtered out of the dashboard conversation view. These insights are generated from existing ticket rows and do not require extra Supabase tables.
+
+## Repeated issue report
+
+The repeated issue monitor answers two questions: how many reports did each issue get, and over what period. Every category in the Support Tickets and Ticket Search panels shows:
+
+- `count` — total tickets for that issue inside the current ticket filter.
+- `period_from` / `period_to` — the issue's own first and last ticket date, rendered as e.g. `September 1, 2025 to September 2, 2025`.
+- `daily_counts` — per-UTC-day ticket counts across that period, so a spike on a single day is visible.
+- `open_count`, `needs_moderator_count`, `closed_count` — status split for the issue.
+
+### Daily Telegram report
+
+`/api/cron/repeated-issue-report` runs at 01:15 UTC and posts a plain-text summary to `TEAM_GROUP_CHAT_ID`. The default window is the report date plus the six preceding UTC days (a rolling 7-day report), and the message states the period explicitly:
+
+```text
+📊 Repeated Issue Report
+Report date: September 7, 2025
+Period: September 1, 2025 to September 7, 2025 (7 days)
+Tickets in period: 42
+Tickets today: 6
+
+Issues by total reports:
+• MiniPay GoodDapp Swap Failed — 12 total (2 today, 4 open)
+   Report period: September 1, 2025 to September 7, 2025
+   Busiest days: 2025-09-03: 4 · 2025-09-05: 3 · 2025-09-02: 2
+```
+
+The run is recorded in `activity_logs` as `REPEATED_ISSUE_REPORT`, and the last delivered report date is stored in `app_settings.repeated_issue_report_last_date` so the cron never double-posts on the same UTC day.
+
+Manual runs:
+
+```bash
+# Send today's default 7-day report (re-sends even if already sent today)
+curl "https://<your-deployment>/api/cron/repeated-issue-report?force=1&secret=<CRON_SECRET>"
+
+# Report a specific window, e.g. September 1 to September 7
+curl "https://<your-deployment>/api/cron/repeated-issue-report?from=2025-09-01&to=2025-09-07&secret=<CRON_SECRET>"
+```
+
+### Detection coverage
+
+User reports about `swap`, generic `failed`/`error` messages, `verification failed`, and `cannot claim` are classified into the AI support categories before they reach the report. Common misspellings (`fialed`, `faild`, `eror`, `verificationfailed`) and Tagalog variants (`hindi maka swap`, `di maka claim`, `hindi ma verify`, `ayaw gumana`) map to the same categories as their correct-English equivalents. Generic failure text that does not match a specific category falls into `General Failure / Error` and is flagged for moderator review. Tickets created before the AI flow are classified with the same rules at report time, so historical rows appear in the report without backfilling.
 
 ## In-group support ticket workflow
 

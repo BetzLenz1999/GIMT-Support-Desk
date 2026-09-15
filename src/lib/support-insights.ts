@@ -21,6 +21,11 @@ export type SupportTicketInsight = {
   latest_customer_message: string;
 };
 
+export type SupportIssueDailyCount = {
+  date: string;
+  count: number;
+};
+
 export type SupportIssueStat = {
   category: string;
   count: number;
@@ -30,6 +35,12 @@ export type SupportIssueStat = {
   solved_count: number;
   not_solved_count: number;
   latest_at: string | null;
+  first_at: string | null;
+  /** Report window for this issue, derived from its own tickets (YYYY-MM-DD). */
+  period_from: string | null;
+  period_to: string | null;
+  /** Per-UTC-day ticket counts inside period_from..period_to, oldest first. */
+  daily_counts: SupportIssueDailyCount[];
   sample_ticket_code: string | null;
   sample_summary: string;
 };
@@ -55,6 +66,7 @@ const CATEGORY_EVIDENCE: Record<AiSupportCategory, string[]> = {
   "Importing Wallet / Importing G$ Token": ["Wallet app", "Network selected", "Token contract used", "Screenshot of token list"],
   "Reward Not Received": ["Wallet address", "Claim/transaction hash if available", "Claim date/time", "Screenshot of balance/history"],
   "Transaction Failed": ["Transaction hash if available", "Wallet address", "Action attempted", "Screenshot/error message"],
+  "General Failure / Error": ["What the user was trying to do", "Exact error message or screenshot", "Wallet address if wallet/claim/swap related", "Transaction hash if the action reached the blockchain"],
   "Pending Case Follow-Up": ["Ticket number", "Wallet address", "Short issue recap", "Latest screenshot/error if changed"],
   "User Provided Evidence": ["Review screenshot/photo", "Wallet address if relevant", "Exact action before the error"],
   "Unknown Issue": ["Short problem description", "Screenshot if available", "Wallet address if wallet/claim related", "Exact error message"]
@@ -85,11 +97,13 @@ export function buildSupportTicketInsight(ticket: SupportTicket, messages: Suppo
   };
 }
 
-export function buildSupportIssueStats(tickets: Array<SupportTicket & { insight?: SupportTicketInsight }>): SupportIssueStat[] {
-  const stats = new Map<string, SupportIssueStat>();
+export function buildSupportIssueStats(
+  tickets: Array<SupportTicket & { insight?: SupportTicketInsight }>
+): SupportIssueStat[] {
+  const stats = new Map<string, SupportIssueStat & { dailyCounts: Map<string, number> }>();
 
   for (const ticket of tickets) {
-    const category = ticket.insight?.category ?? extractAiCategory(ticket.opened_message_text) ?? "Unknown Issue";
+    const category = resolveTicketCategory(ticket);
     const current = stats.get(category) ?? {
       category,
       count: 0,
@@ -99,8 +113,13 @@ export function buildSupportIssueStats(tickets: Array<SupportTicket & { insight?
       solved_count: 0,
       not_solved_count: 0,
       latest_at: null,
+      first_at: null,
+      period_from: null,
+      period_to: null,
+      daily_counts: [],
       sample_ticket_code: null,
-      sample_summary: ""
+      sample_summary: "",
+      dailyCounts: new Map<string, number>()
     };
 
     current.count += 1;
@@ -109,16 +128,60 @@ export function buildSupportIssueStats(tickets: Array<SupportTicket & { insight?
     if (ticket.closed_at || ticket.status === "expired" || ticket.status.endsWith("_closed")) current.closed_count += 1;
     if (ticket.status === "solved_closed") current.solved_count += 1;
     if (ticket.status === "not_solved_closed") current.not_solved_count += 1;
-    if (!current.latest_at || new Date(ticket.created_at).getTime() > new Date(current.latest_at).getTime()) {
-      current.latest_at = ticket.created_at;
+
+    const createdAt = ticket.created_at;
+    if (!current.first_at || new Date(createdAt).getTime() < new Date(current.first_at).getTime()) {
+      current.first_at = createdAt;
+    }
+    if (!current.latest_at || new Date(createdAt).getTime() > new Date(current.latest_at).getTime()) {
+      current.latest_at = createdAt;
       current.sample_ticket_code = ticket.ticket_code ?? ticket.id.slice(0, 8);
       current.sample_summary = ticket.insight?.summary ?? summarizeText(extractOriginalQuestion(ticket.opened_message_text) || ticket.opened_message_text, 120);
     }
 
+    const dayKey = createdAt.slice(0, 10);
+    current.dailyCounts.set(dayKey, (current.dailyCounts.get(dayKey) ?? 0) + 1);
+
     stats.set(category, current);
   }
 
-  return [...stats.values()].sort((a, b) => b.count - a.count || (new Date(b.latest_at ?? 0).getTime() - new Date(a.latest_at ?? 0).getTime()));
+  return [...stats.values()]
+    .map((stat) => {
+      const { dailyCounts, ...rest } = stat;
+      const days = splitDateRange(
+        rest.first_at?.slice(0, 10) ?? null,
+        rest.latest_at?.slice(0, 10) ?? null
+      );
+      return {
+        ...rest,
+        period_from: days[0] ?? null,
+        period_to: days[days.length - 1] ?? null,
+        daily_counts: days.map((date) => ({ date, count: dailyCounts.get(date) ?? 0 }))
+      };
+    })
+    .sort((a, b) => b.count - a.count || (new Date(b.latest_at ?? 0).getTime() - new Date(a.latest_at ?? 0).getTime()));
+}
+
+/** Same text classifier the bot uses, so dashboard stats and ticket metadata agree. */
+export function resolveTicketCategory(ticket: SupportTicket & { insight?: SupportTicketInsight }): string {
+  if (ticket.insight?.category) return ticket.insight.category;
+  const explicit = extractAiCategory(ticket.opened_message_text);
+  if (explicit) return explicit;
+  return detectAiSupportTemplate(extractOriginalQuestion(ticket.opened_message_text) || ticket.opened_message_text).category;
+}
+
+/** Inclusive list of YYYY-MM-DD keys between two date keys. */
+export function splitDateRange(from: string | null, to: string | null): string[] {
+  if (!from || !to) return [];
+  const start = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end.getTime() < start.getTime()) return [];
+
+  const days: string[] = [];
+  for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 24 * 60 * 60_000) {
+    days.push(new Date(cursor).toISOString().slice(0, 10));
+  }
+  return days;
 }
 
 function extractAiCategory(text: string): AiSupportCategory | null {

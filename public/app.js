@@ -10,7 +10,9 @@ const ACTION_LABEL = {
   absent_requested: "Absent Requested",
   shift_swap_requested: "Shift Swap Requested",
   shift_swap_response: "Shift Swap Response",
-  registered: "Registered"
+  registered: "Registered",
+  REPEATED_ISSUE_REPORT: "Repeated Issue Report",
+  DAILY_REPORT: "Daily Report"
 };
 
 const ACTION_PILL = {
@@ -22,7 +24,9 @@ const ACTION_PILL = {
   absent_requested: "pill-red",
   shift_swap_requested: "pill-slate",
   shift_swap_response: "pill-slate",
-  registered: "pill-slate"
+  registered: "pill-slate",
+  REPEATED_ISSUE_REPORT: "pill-blue",
+  DAILY_REPORT: "pill-blue"
 };
 
 const PROOF_STATUS_PILL = {
@@ -80,12 +84,14 @@ const state = {
     rows: [],
     groups: [],
     issueStats: [],
+    issueReport: null,
     filters: { assigned_member_id: "", scheduled_member_id: "", status: "", telegram_chat_id: "" },
     expandedIds: new Set()
   },
   ticketSearch: {
     rows: [],
     issueStats: [],
+    issueReport: null,
     filters: { q: "", member_id: "", status: "" },
     expandedIds: new Set()
   },
@@ -1101,22 +1107,52 @@ function renderIssueStats(targetSelector, stats) {
     return;
   }
 
-  target.innerHTML = topStats.map((stat) => `
-    <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm">
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(stat.category)}</div>
-          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Latest: ${escapeHtml(fmtTimeUtc(stat.latest_at))}${stat.sample_ticket_code ? ` · #${escapeHtml(stat.sample_ticket_code)}` : ""}</div>
+  target.innerHTML = topStats.map((stat) => {
+    const period = stat.period_from
+      ? `${fmtReportDate(stat.period_from)} to ${fmtReportDate(stat.period_to || stat.period_from)}`
+      : "No report period yet";
+    const daily = Array.isArray(stat.daily_counts) ? stat.daily_counts : [];
+    const dailyTotal = daily.reduce((sum, day) => sum + Number(day.count || 0), 0);
+    const dailySummary = dailyTotal
+      ? daily.filter((day) => Number(day.count) > 0).map((day) => `${day.date}: ${day.count}`).join(" · ")
+      : "No daily breakdown available";
+    return `
+      <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(stat.category)}</div>
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Report date: ${escapeHtml(period)}</div>
+            <div class="mt-1 text-[11px] text-slate-400">Latest: ${escapeHtml(fmtTimeUtc(stat.latest_at))}${stat.sample_ticket_code ? ` · #${escapeHtml(stat.sample_ticket_code)}` : ""}</div>
+          </div>
+          <div class="text-right">
+            <div class="text-lg font-bold text-teal-700 dark:text-teal-300">${escapeHtml(stat.count)}</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400">total reports</div>
+          </div>
         </div>
-        <div class="text-right">
-          <div class="text-lg font-bold text-teal-700 dark:text-teal-300">${escapeHtml(stat.count)}</div>
-          <div class="text-[10px] uppercase tracking-wide text-slate-400">tickets</div>
-        </div>
+        <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Closed: ${escapeHtml(stat.closed_count || 0)}</div>
+        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400"><strong>Daily:</strong> <span class="whitespace-pre-wrap">${escapeHtml(dailySummary)}</span></div>
+        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(stat.sample_summary)}</div>
       </div>
-      <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Closed: ${escapeHtml(stat.closed_count || 0)}</div>
-      <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(stat.sample_summary)}</div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
+}
+
+function fmtReportDate(dateKey) {
+  if (!dateKey) return "—";
+  const parsed = new Date(`${String(dateKey).slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return String(dateKey);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(parsed);
+}
+
+function renderIssueReportSummary(selector, report) {
+  const el = $(selector);
+  if (!el) return;
+  if (!report) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = `Report period: ${fmtReportDate(report.range_from)} to ${fmtReportDate(report.range_to)} · ` +
+    `${report.total_tickets} ticket${report.total_tickets === 1 ? "" : "s"} in period · ${report.today_total} today`;
 }
 
 function renderTicketRow(row, source = "tickets") {
@@ -1189,6 +1225,7 @@ function renderTickets() {
   const closedCount = rows.filter((row) => row.closed_at || row.status === "expired" || String(row.status || "").endsWith("_closed")).length;
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
   renderIssueStats("#tickets-issue-stats", state.tickets.issueStats);
+  renderIssueReportSummary("#tickets-issue-report", state.tickets.issueReport);
   const selectedGroup = state.tickets.filters.telegram_chat_id
     ? state.tickets.groups.find((group) => String(group.telegram_chat_id) === state.tickets.filters.telegram_chat_id)
     : null;
@@ -1210,6 +1247,7 @@ function renderTicketSearch() {
   }
   const messageCount = rows.reduce((sum, row) => sum + (row.messages || []).length, 0);
   renderIssueStats("#ticket-search-issue-stats", state.ticketSearch.issueStats);
+  renderIssueReportSummary("#ticket-search-issue-report", state.ticketSearch.issueReport);
   const activeFilters = [
     state.ticketSearch.filters.q ? `search: “${state.ticketSearch.filters.q}”` : "",
     state.ticketSearch.filters.member_id ? "team member selected" : "",
@@ -1230,6 +1268,7 @@ async function loadTicketSearch() {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.ticketSearch.rows = data.tickets;
     state.ticketSearch.issueStats = data.issue_stats || [];
+    state.ticketSearch.issueReport = data.issue_reports || null;
     renderTicketSearch();
   } catch (error) {
     $("#ticket-search-body").innerHTML = `<tr><td colspan="8" class="text-center text-sm text-red-600 dark:text-red-400 py-4">Failed to search: ${escapeHtml(error.message)}</td></tr>`;
@@ -1261,6 +1300,7 @@ async function loadTickets() {
     const data = await fetchJson(`/api/web/support-tickets?${qs.toString()}`);
     state.tickets.rows = data.tickets;
     state.tickets.issueStats = data.issue_stats || [];
+    state.tickets.issueReport = data.issue_reports || null;
     const groupsById = new Map(state.tickets.groups.map((group) => [String(group.telegram_chat_id), group]));
     for (const ticket of data.tickets) {
       if (!ticket.telegram_chat_id) continue;

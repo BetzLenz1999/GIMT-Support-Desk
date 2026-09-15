@@ -17,6 +17,7 @@ export type AiSupportCategory =
   | "Importing Wallet / Importing G$ Token"
   | "Reward Not Received"
   | "Transaction Failed"
+  | "General Failure / Error"
   | "Pending Case Follow-Up"
   | "User Provided Evidence"
   | "Unknown Issue";
@@ -152,6 +153,15 @@ Please check the following:
 
 If it still fails, please send your wallet address, screenshot, transaction hash if available, and the exact error message.`;
 
+const GENERAL_FAILURE_RESPONSE = `Hi! Sorry you hit a failure. To help a moderator reproduce and check it, please send:
+
+• What you were trying to do (claim, swap, transfer, verify, connect, etc.).
+• The exact error message or screenshot.
+• Your wallet address if a wallet/claim/swap/reward is involved.
+• A transaction hash if the action reached the blockchain.
+
+If you already sent these, a moderator will review your case.`;
+
 const PENDING_CASE_RESPONSE = `Hi! Thanks for following up. Your case may still be under review by the support team.
 
 Please provide your ticket number if you have one, or send your wallet address and a short description of your issue so we can check the status of your case.
@@ -192,7 +202,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Cannot Claim G$",
-    intentExamples: ["cannot claim", "can't claim", "cant claim", "unable to claim", "claim not working", "hindi ako makapag", "di ako makapag", "g$ claim failed", "i cannot claim", "why i can't claim g$", "can't claim g$", "cant claim g$", "di ako makapag claim", "hindi ako makapag claim"],
+    intentExamples: ["cannot claim", "can't claim", "cant claim", "can not claim", "cannotclaim", "unable to claim", "claim not working", "claim is not working", "claim won't work", "claim wont work", "claim not working for me", "can't claim my g$", "hindi ako makapag", "di ako makapag", "hindi maka claim", "di maka claim", "di makapag claim", "hindi ako maka-claim", "g$ claim failed", "i cannot claim", "why i can't claim g$", "can't claim g$", "cant claim g$", "di ako makapag claim", "hindi ako makapag claim"],
     response: CANNOT_CLAIM_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -200,7 +210,7 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Face Verification Failed",
-    intentExamples: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission", "face verification failed", "selfie verification failed", "face scan failed", "camera access denied", "face not detected"],
+    intentExamples: ["face verification", "face verification failed", "verification failed", "verificationfailed", "verification fail", "verify failed", "verification not working", "face verify failed", "face scan", "face scan failed", "selfie", "selfie failed", "selfie verification failed", "camera permission", "camera access denied", "face not detected", "cannot verify", "can't verify", "cant verify", "hindi ma verify", "di ma verify", "verification error"],
     response: FACE_VERIFICATION_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
@@ -248,11 +258,55 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
   },
   {
     category: "Transaction Failed",
-    intentExamples: ["transaction failed", "my transaction didn't go through", "failed transaction", "why my transaction failed", "transfer failed", "swap transaction failed"],
+    intentExamples: [
+      "transaction failed",
+      "my transaction didn't go through",
+      "failed transaction",
+      "why my transaction failed",
+      "transfer failed",
+      "swap transaction failed",
+      "transaction error",
+      "tx failed",
+      "failed to send",
+      "error while sending",
+      "nabigo ang transaction",
+      "failed ang transaction"
+    ],
     response: TRANSACTION_FAILED_RESPONSE,
     defaultDashboardStatus: "Auto-Replied",
     alwaysEscalate: false,
     escalateIf: "funds affected / repeated failure / transaction hash available"
+  },
+  {
+    category: "General Failure / Error",
+    intentExamples: [
+      "failed",
+      "fialed",
+      "faild",
+      "failed again",
+      "still failed",
+      "keeps failing",
+      "always failed",
+      "error",
+      "eror",
+      "i got an error",
+      "some error",
+      "unknown error",
+      "something went wrong",
+      "it's not working",
+      "its not working",
+      "still not working",
+      "not working",
+      "hindi gumagana",
+      "ayaw gumana",
+      "ayaw mag work",
+      "bigo",
+      "nabigo"
+    ],
+    response: GENERAL_FAILURE_RESPONSE,
+    defaultDashboardStatus: "Needs Moderator Review",
+    alwaysEscalate: true,
+    escalateIf: "generic failure/error without a clear category, always review"
   },
   {
     category: "Pending Case Follow-Up",
@@ -283,16 +337,17 @@ export const AI_SUPPORT_TEMPLATES: AiSupportTemplate[] = [
 const KEYWORD_RULES: Array<{ category: AiSupportCategory; keywords: string[]; score: number }> = [
   { category: "User Provided Evidence", keywords: ["screenshot", "screen shot", "see image", "photo", "this is the error", "error shown", "got this message"], score: 100 },
   { category: "Pending Case Follow-Up", keywords: ["update on my case", "follow up", "follow-up", "ticket", "pending case", "no update", "check my case"], score: 95 },
-  { category: "MiniPay GoodDapp Swap Failed", keywords: ["minipay", "gooddapp", "swap", "swapping", "swap failed"], score: 90 },
+  { category: "MiniPay GoodDapp Swap Failed", keywords: ["minipay", "gooddapp", "swap", "swapping", "swap failed", "swap fialed", "swap faild", "swap not working", "cannot swap", "can't swap", "cant swap", "unable to swap", "hindi maka swap", "di maka swap", "hindi makapag swap", "nabigo ang swap", "error sa swap"], score: 90 },
   { category: "Importing Wallet / Importing G$ Token", keywords: ["how to import wallet", "import wallet to metamask", "import wallet to trustwallet", "import wallet to trust wallet", "how to import g$ token", "add g$ token", "import goodwallet", "export goodwallet", "goodwallet to metamask", "goodwallet to trustwallet", "goodwallet to trust wallet", "add gooddollar token", "import gooddollar token", "g$ token not showing", "gooddollar token not showing"], score: 88 },
-  { category: "Face Verification Failed", keywords: ["face verification", "face scan", "selfie", "verification failed", "verify failed", "camera permission", "camera access denied", "face not detected"], score: 85 },
-  { category: "GoodWallet Claiming Failed", keywords: ["goodwallet claim failed", "claiming failed", "claim button", "can't claim in goodwallet", "cant claim in goodwallet", "goodwallet claim not working", "claim failed in goodwallet", "my claim failed", "claim button not working"], score: 82 },
-  { category: "Cannot Claim G$", keywords: ["cannot claim", "can't claim", "cant claim", "unable to claim", "claim not working", "hindi ako makapag", "di ako makapag", "g$ claim failed"], score: 80 },
+  { category: "Face Verification Failed", keywords: ["face verification", "face verify", "face scan", "selfie", "verification failed", "verificationfailed", "verification fail", "verification fialed", "verification not working", "verify failed", "verification error", "cannot verify", "can't verify", "cant verify", "camera permission", "camera access denied", "face not detected", "hindi ma verify", "di ma verify", "hindi ma-verify"], score: 85 },
+  { category: "GoodWallet Claiming Failed", keywords: ["goodwallet claim failed", "claiming failed", "claim fialed", "claim button", "can't claim in goodwallet", "cant claim in goodwallet", "goodwallet claim not working", "claim failed in goodwallet", "my claim failed", "claim button not working"], score: 82 },
+  { category: "Cannot Claim G$", keywords: ["cannot claim", "can not claim", "cannotclaim", "can't claim", "cant claim", "unable to claim", "claim not working", "claim won't work", "claim wont work", "hindi ako makapag", "di ako makapag", "hindi maka claim", "di maka claim", "hindi maka-claim", "g$ claim failed", "claim failed"], score: 80 },
   { category: "How to Claim G$", keywords: ["how to claim", "where can i claim", "how can i get gooddollar", "how do i claim", "how to claim etc", "claim gooddollar", "claim g$", "paano mag claim", "paano mag-claim"], score: 78 },
-  { category: "Wallet Connection Issue", keywords: ["wallet not connecting", "connect wallet", "can't connect", "cant connect", "metamask not connecting", "trustwallet not connecting", "wallet connection", "wallet connect", "walletconnect"], score: 76 },
-  { category: "Gas Fee Issue", keywords: ["not enough gas", "gas fee", "need gas", "what is gas", "how much gas", "gas problem"], score: 74 },
-  { category: "Reward Not Received", keywords: ["didn't receive", "did not receive", "reward missing", "balance not showing", "claimed but no balance", "where is my g$", "not received"], score: 72 },
-  { category: "Transaction Failed", keywords: ["transaction failed", "failed transaction", "transaction didn't go", "didn't go through", "transfer failed", "tx failed"], score: 70 }
+  { category: "Wallet Connection Issue", keywords: ["wallet not connecting", "connect wallet", "can't connect", "cant connect", "metamask not connecting", "trustwallet not connecting", "wallet connection", "wallet connect", "walletconnect", "hindi ma connect", "di ma connect"], score: 76 },
+  { category: "Gas Fee Issue", keywords: ["not enough gas", "gas fee", "need gas", "what is gas", "how much gas", "gas problem", "no gas", "insufficient gas"], score: 74 },
+  { category: "Reward Not Received", keywords: ["didn't receive", "did not receive", "reward missing", "balance not showing", "claimed but no balance", "where is my g$", "not received", "no balance", "hindi ko natanggap", "di ko natanggap", "wala akong natanggap"], score: 72 },
+  { category: "Transaction Failed", keywords: ["transaction failed", "transaction fialed", "failed transaction", "transaction didn't go", "didn't go through", "transfer failed", "tx failed", "failed to send", "error while sending", "transaction error", "nabigo ang transaction", "failed ang transaction"], score: 70 },
+  { category: "General Failure / Error", keywords: ["failed", "fialed", "faild", "fail", "error", "eror", "not working", "doesn't work", "does not work", "won't work", "wont work", "still not working", "keeps failing", "something went wrong", "unknown error", "hindi gumagana", "ayaw gumana", "ayaw mag work", "bigo", "nabigo"], score: 30 }
 ];
 
 const TEMPLATES_BY_CATEGORY = new Map(AI_SUPPORT_TEMPLATES.map((template) => [template.category, template]));
