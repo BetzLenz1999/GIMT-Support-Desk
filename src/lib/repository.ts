@@ -577,14 +577,46 @@ export async function findActiveSupportTicketByMessageReference(
   return ticket;
 }
 
+/**
+ * PostgREST `in.(...)` filters live in the query string, so a large value list
+ * overflows the HTTP request line. Node rejects a request line plus headers over
+ * 16 KB with 431, which surfaced as a 500 on the dashboard once the ticket table
+ * grew past a few hundred rows. Keep each `in.(...)` list well under that.
+ */
+export const SUPABASE_IN_LIST_CHUNK_SIZE = 100;
+
+/** Splits values into request-sized batches for `in.(...)` filters. */
+export function chunkValues<T>(values: readonly T[], size = SUPABASE_IN_LIST_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function listSupportTicketMessages(
   db: SupabaseRestClient,
   ticketIds: string[]
 ): Promise<SupportTicketMessage[]> {
   if (!ticketIds.length) return [];
-  return db.select<SupportTicketMessage>(
-    "support_ticket_messages",
-    params(inList("ticket_id", ticketIds), order("message_date_utc", true))
+
+  const messages: SupportTicketMessage[] = [];
+  for (const chunk of chunkValues(ticketIds)) {
+    messages.push(
+      ...(await db.select<SupportTicketMessage>(
+        "support_ticket_messages",
+        params(inList("ticket_id", chunk), order("message_date_utc", true), order("created_at", true))
+      ))
+    );
+  }
+
+  // Chunked queries each return their own slice, so restore one ascending
+  // conversation order across all of them.
+  return messages.sort(
+    (a, b) =>
+      a.message_date_utc.localeCompare(b.message_date_utc) ||
+      a.created_at.localeCompare(b.created_at) ||
+      a.id.localeCompare(b.id)
   );
 }
 
