@@ -11,6 +11,9 @@
 [functions."cron-daily-report"]
   schedule = "5 1 * * *"
 
+[functions."cron-repeated-issue-report"]
+  schedule = "15 1 * * *"
+
 [[redirects]]
   from = "/api/web/activity"
   to = "/.netlify/functions/web-activity"
@@ -49,4 +52,9 @@
 [[redirects]]
   from = "/api/cron/daily-report"
   to = "/.netlify/functions/cron-daily-report"
+  status = 200
+
+[[redirects]]
+  from = "/api/cron/repeated-issue-report"
+  to = "/.netlify/functions/cron-repeated-issue-report"
   status = 200

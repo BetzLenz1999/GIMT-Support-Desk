@@ -297,6 +297,10 @@ export function lte(field: string, value: string | number): [string, string] {
   return [field, `lte.${value}`];
 }
 
+export function gte(field: string, value: string | number): [string, string] {
+  return [field, `gte.${value}`];
+}
+
 export function inList(field: string, values: ReadonlyArray<string | number>): [string, string] {
   return [field, `in.(${values.map((v) => String(v)).join(",")})`];
 }

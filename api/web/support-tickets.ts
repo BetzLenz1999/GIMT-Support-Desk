@@ -2,6 +2,7 @@ import { eq, inList, limit, order, params, type SupportTicket, type SupportTicke
 import { getSupabase } from "../../src/lib/supabase.js";
 import { listSupportTicketMessages } from "../../src/lib/repository.js";
 import { buildSupportIssueStats, buildSupportTicketInsight } from "../../src/lib/support-insights.js";
+import { buildRepeatedIssueReport, resolveReportWindow } from "../../src/lib/repeated-issue-report.js";
 
 function sendJson(response: any, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
@@ -127,12 +128,25 @@ export default async function handler(request: any, response: any) {
 
     const issueStats = buildSupportIssueStats(searchableTickets);
 
+    // The dashboard's repeated-issue panel reports a fixed window (default: last
+    // 7 UTC days) independently of the ticket table filters, so each issue keeps
+    // its own reporting period and per-day totals.
+    const defaultWindow = resolveReportWindow(new Date());
+    const reportFrom = url.searchParams.get("report_from") || defaultWindow.rangeFrom;
+    const reportTo = url.searchParams.get("report_to") || defaultWindow.rangeTo;
+    const repeatedIssueReport = buildRepeatedIssueReport(searchableTickets, {
+      reportDate: new Date(`${reportTo}T00:00:00.000Z`),
+      rangeFrom: reportFrom,
+      rangeTo: reportTo
+    });
+
     sendJson(response, 200, {
       ok: true,
       count: searchableTickets.length,
       tickets: searchableTickets,
       coverage,
-      issue_stats: issueStats
+      issue_stats: issueStats,
+      issue_reports: repeatedIssueReport
     });
   } catch (error) {
     sendJson(response, 500, {
