@@ -1,8 +1,8 @@
 import { eq, inList, limit, order, params, type SupportTicket, type SupportTicketMessage, type TelegramGroup } from "../../src/lib/supabase.js";
 import { getSupabase } from "../../src/lib/supabase.js";
-import { listSupportTicketMessages } from "../../src/lib/repository.js";
+import { chunkValues, listSupportTicketMessages } from "../../src/lib/repository.js";
 import { buildSupportIssueStats, buildSupportTicketInsight } from "../../src/lib/support-insights.js";
-import { buildRepeatedIssueReport, resolveReportWindow } from "../../src/lib/repeated-issue-report.js";
+import { buildRepeatedIssueReport, resolveExplicitReportWindow } from "../../src/lib/repeated-issue-report.js";
 
 function sendJson(response: any, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
@@ -54,7 +54,9 @@ export default async function handler(request: any, response: any) {
     let groups: TelegramGroup[] = [];
     if (chatIds.length > 0) {
       try {
-        groups = await db.select<TelegramGroup>("telegram_groups", params(inList("telegram_chat_id", chatIds)));
+        for (const chunk of chunkValues(chatIds)) {
+          groups.push(...(await db.select<TelegramGroup>("telegram_groups", params(inList("telegram_chat_id", chunk)))));
+        }
       } catch (error) {
         console.warn(`Could not load telegram_groups metadata for support tickets: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -128,17 +130,16 @@ export default async function handler(request: any, response: any) {
 
     const issueStats = buildSupportIssueStats(searchableTickets);
 
-    // The dashboard's repeated-issue panel reports a fixed window (default: last
+    // The dashboard's repeated-issue panel reports its own window (default: last
     // 7 UTC days) independently of the ticket table filters, so each issue keeps
-    // its own reporting period and per-day totals.
-    const defaultWindow = resolveReportWindow(new Date());
-    const reportFrom = url.searchParams.get("report_from") || defaultWindow.rangeFrom;
-    const reportTo = url.searchParams.get("report_to") || defaultWindow.rangeTo;
-    const repeatedIssueReport = buildRepeatedIssueReport(searchableTickets, {
-      reportDate: new Date(`${reportTo}T00:00:00.000Z`),
-      rangeFrom: reportFrom,
-      rangeTo: reportTo
-    });
+    // its own reporting period and per-day totals. Missing or malformed values
+    // fall back to the default window rather than failing the whole response.
+    const reportWindow = resolveExplicitReportWindow(
+      new Date(),
+      url.searchParams.get("report_from"),
+      url.searchParams.get("report_to")
+    );
+    const repeatedIssueReport = buildRepeatedIssueReport(searchableTickets, reportWindow);
 
     sendJson(response, 200, {
       ok: true,

@@ -22,6 +22,8 @@ export type RepeatedIssueReport = {
 };
 
 const DEFAULT_RANGE_DAYS = 7;
+/** Upper bound so a hand-written range cannot build an unbounded daily breakdown. */
+export const MAX_RANGE_DAYS = 366;
 const DAY_MS = 24 * 60 * 60_000;
 
 export type RepeatedIssueReportWindow = {
@@ -29,6 +31,15 @@ export type RepeatedIssueReportWindow = {
   rangeFrom: string;
   rangeTo: string;
 };
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True for a well-formed calendar date key, rejecting e.g. "bogus" or "2025-02-31". */
+export function isValidDateKey(value: string | null | undefined): value is string {
+  if (!value || !DATE_KEY_PATTERN.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && utcDateKey(parsed) === value;
+}
 
 /** Default window: the report date plus the six UTC days before it. */
 export function resolveReportWindow(reportDate = new Date(), days = DEFAULT_RANGE_DAYS): RepeatedIssueReportWindow {
@@ -39,7 +50,11 @@ export function resolveReportWindow(reportDate = new Date(), days = DEFAULT_RANG
   };
 }
 
-/** Builds a window from explicit ISO date keys, falling back to a relative range. */
+/**
+ * Builds a window from explicit ISO date keys, falling back to a relative range
+ * for anything missing or malformed. Inverted ranges are swapped, and overly
+ * long ranges keep their end date but are clamped to `MAX_RANGE_DAYS`.
+ */
 export function resolveExplicitReportWindow(
   reportDate: Date,
   rangeFrom?: string | null,
@@ -47,11 +62,18 @@ export function resolveExplicitReportWindow(
   days = DEFAULT_RANGE_DAYS
 ): RepeatedIssueReportWindow {
   const fallback = resolveReportWindow(reportDate, days);
-  return {
-    reportDate,
-    rangeFrom: rangeFrom || fallback.rangeFrom,
-    rangeTo: rangeTo || fallback.rangeTo
-  };
+  let from = isValidDateKey(rangeFrom) ? rangeFrom : fallback.rangeFrom;
+  let to = isValidDateKey(rangeTo) ? rangeTo : fallback.rangeTo;
+
+  if (from > to) [from, to] = [to, from];
+
+  const fromTime = new Date(`${from}T00:00:00.000Z`).getTime();
+  const toTime = new Date(`${to}T00:00:00.000Z`).getTime();
+  if ((toTime - fromTime) / DAY_MS + 1 > MAX_RANGE_DAYS) {
+    from = utcDateKey(new Date(toTime - (MAX_RANGE_DAYS - 1) * DAY_MS));
+  }
+
+  return { reportDate, rangeFrom: from, rangeTo: to };
 }
 
 /**
