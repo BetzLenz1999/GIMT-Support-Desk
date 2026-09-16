@@ -352,6 +352,15 @@ const KEYWORD_RULES: Array<{ category: AiSupportCategory; keywords: string[]; sc
 
 const TEMPLATES_BY_CATEGORY = new Map(AI_SUPPORT_TEMPLATES.map((template) => [template.category, template]));
 
+/** Every category the classifier can emit, for validating user-supplied filters. */
+export const AI_SUPPORT_CATEGORIES: readonly AiSupportCategory[] = AI_SUPPORT_TEMPLATES.map(
+  (template) => template.category
+);
+
+export function isAiSupportCategory(value: unknown): value is AiSupportCategory {
+  return typeof value === "string" && TEMPLATES_BY_CATEGORY.has(value as AiSupportCategory);
+}
+
 export function detectAiSupportTemplate(messageText: string, hasPhoto = false): AiSupportMatch {
   const normalized = normalizeText(messageText);
   if (hasPhoto && !normalized) {
