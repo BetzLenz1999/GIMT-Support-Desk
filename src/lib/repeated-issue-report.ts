@@ -1,4 +1,5 @@
 import { listSupportTicketsInRange } from "./repository.js";
+import { supportRollupMembers } from "./ai-support.js";
 import { buildSupportIssueStats, resolveTicketCategory, splitDateRange, type SupportIssueDailyCount, type SupportIssueStat, type SupportTicketInsight } from "./support-insights.js";
 import { utcDateKey } from "./time.js";
 import type { SupabaseRestClient, SupportTicket } from "./supabase.js";
@@ -153,10 +154,14 @@ export function formatRepeatedIssueReportText(report: RepeatedIssueReport): stri
   lines.push("");
   lines.push("Issues by total reports:");
   for (const category of report.categories) {
+    const members = supportRollupMembers(category.category);
     lines.push(
       `• ${category.category} — ${category.count} total` +
       ` (${category.today_count} today, ${category.open_count} open)`
     );
+    if (members?.length) {
+      lines.push(`   Includes: ${members.join(", ")}`);
+    }
     lines.push(
       `   Report period: ${formatReportDate(category.period_from ?? report.range_from)}` +
       ` to ${formatReportDate(category.period_to ?? report.range_to)}`
@@ -230,6 +235,20 @@ function toIssueReportTicket(ticket: SupportTicket & { insight?: SupportTicketIn
 }
 
 /**
+ * True when a ticket belongs under a report category, which is either the
+ * ticket's own leaf category or any umbrella rollup that includes that leaf.
+ */
+export function ticketMatchesReportCategory(
+  ticket: SupportTicket & { insight?: SupportTicketInsight },
+  category: string
+): boolean {
+  const ticketCategory = resolveTicketCategory(ticket);
+  if (ticketCategory === category) return true;
+  const members = supportRollupMembers(category);
+  return Boolean(members && members.includes(ticketCategory as (typeof members)[number]));
+}
+
+/**
  * Builds the per-issue report the dashboard links to. Tickets are matched with
  * the same classifier the bot uses, then scoped to the requested window.
  */
@@ -242,7 +261,7 @@ export function buildIssueReport(
   const days = splitDateRange(rangeFrom, rangeTo);
 
   const matched = tickets.filter((ticket) => {
-    if (resolveTicketCategory(ticket) !== category) return false;
+    if (!ticketMatchesReportCategory(ticket, category)) return false;
     const day = ticket.created_at.slice(0, 10);
     return day >= rangeFrom && day <= rangeTo;
   });
@@ -302,6 +321,8 @@ export async function loadIssueReport(
 export function formatIssueReportText(report: IssueReport): string {
   const lines: string[] = [];
   lines.push(`Issue Report: ${report.category}`);
+  const members = supportRollupMembers(report.category);
+  if (members?.length) lines.push(`Includes: ${members.join(", ")}`);
   lines.push(`Period: ${formatReportDate(report.range_from)} to ${formatReportDate(report.range_to)} (${dayWord(report.range_days)})`);
   lines.push(`Total reports: ${report.total_tickets}`);
   lines.push(`Open: ${report.open_count} · Closed: ${report.closed_count}`);
@@ -338,7 +359,8 @@ export function reportToMetadata(report: RepeatedIssueReport): Record<string, un
       open: category.open_count,
       periodFrom: category.period_from,
       periodTo: category.period_to,
-      dailyCounts: category.daily_counts
+      dailyCounts: category.daily_counts,
+      ...(category.is_rollup ? { isRollup: true, includes: category.includes ?? [] } : {})
     }))
   };
 }

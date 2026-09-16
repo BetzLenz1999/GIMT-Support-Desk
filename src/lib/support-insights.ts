@@ -1,4 +1,4 @@
-import { detectAiSupportTemplate, type AiSupportCategory, type AiSupportDashboardStatus } from "./ai-support.js";
+import { detectAiSupportTemplate, supportRollupMembers, supportRollupsFor, type AiSupportCategory, type AiSupportDashboardStatus } from "./ai-support.js";
 import type { SupportTicket, SupportTicketMessage } from "./supabase.js";
 
 export type SupportDetectedLanguage = {
@@ -43,7 +43,105 @@ export type SupportIssueStat = {
   daily_counts: SupportIssueDailyCount[];
   sample_ticket_code: string | null;
   sample_summary: string;
+  /**
+   * True when the row is a reporting-only rollup. The ticket still belongs to
+   * its leaf category, so rollup counts overlap leaf counts by design rather
+   * than splitting them.
+   */
+  is_rollup?: boolean;
+  /** Leaf categories aggregated into a rollup row; undefined for leaf rows. */
+  includes?: string[];
 };
+
+const OPEN_TICKET_STATUSES = ["open", "accepted", "pending_user_resolution", "pending_follow_up"];
+
+type SupportIssueAccumulator = SupportIssueStat & { dailyCounts: Map<string, number> };
+
+function createIssueAccumulator(category: string): SupportIssueAccumulator {
+  return {
+    category,
+    count: 0,
+    open_count: 0,
+    needs_moderator_count: 0,
+    closed_count: 0,
+    solved_count: 0,
+    not_solved_count: 0,
+    latest_at: null,
+    first_at: null,
+    period_from: null,
+    period_to: null,
+    daily_counts: [],
+    sample_ticket_code: null,
+    sample_summary: "",
+    dailyCounts: new Map<string, number>()
+  };
+}
+
+function applyTicketToStat(stat: SupportIssueAccumulator, ticket: SupportTicket & { insight?: SupportTicketInsight }): void {
+  stat.count += 1;
+  if (OPEN_TICKET_STATUSES.includes(ticket.status)) stat.open_count += 1;
+  if (ticket.insight?.dashboard_status === "Needs Moderator Review" || ticket.status === "open" || ticket.status === "accepted") stat.needs_moderator_count += 1;
+  if (ticket.closed_at || ticket.status === "expired" || ticket.status.endsWith("_closed")) stat.closed_count += 1;
+  if (ticket.status === "solved_closed") stat.solved_count += 1;
+  if (ticket.status === "not_solved_closed") stat.not_solved_count += 1;
+
+  const createdAt = ticket.created_at;
+  if (!stat.first_at || new Date(createdAt).getTime() < new Date(stat.first_at).getTime()) {
+    stat.first_at = createdAt;
+  }
+  if (!stat.latest_at || new Date(createdAt).getTime() > new Date(stat.latest_at).getTime()) {
+    stat.latest_at = createdAt;
+    stat.sample_ticket_code = ticket.ticket_code ?? ticket.id.slice(0, 8);
+    stat.sample_summary = ticket.insight?.summary ?? summarizeText(extractOriginalQuestion(ticket.opened_message_text) || ticket.opened_message_text, 120);
+  }
+
+  const dayKey = createdAt.slice(0, 10);
+  stat.dailyCounts.set(dayKey, (stat.dailyCounts.get(dayKey) ?? 0) + 1);
+}
+
+export function buildSupportIssueStats(
+  tickets: Array<SupportTicket & { insight?: SupportTicketInsight }>
+): SupportIssueStat[] {
+  const stats = new Map<string, SupportIssueAccumulator>();
+
+  for (const ticket of tickets) {
+    const category = resolveTicketCategory(ticket);
+    const current = stats.get(category) ?? createIssueAccumulator(category);
+    applyTicketToStat(current, ticket);
+    stats.set(category, current);
+
+    // A ticket is counted once under its leaf category and once per umbrella
+    // rollup it belongs to, so the leaf count the report has always shown does
+    // not change while the umbrella total covers every member category.
+    if (isAiSupportCategory(category)) {
+      for (const rollup of supportRollupsFor(category)) {
+        const rollupStat = stats.get(rollup) ?? {
+          ...createIssueAccumulator(rollup),
+          is_rollup: true,
+          includes: [...(supportRollupMembers(rollup) ?? [])]
+        };
+        applyTicketToStat(rollupStat, ticket);
+        stats.set(rollup, rollupStat);
+      }
+    }
+  }
+
+  return [...stats.values()]
+    .map((stat) => {
+      const { dailyCounts, ...rest } = stat;
+      const days = splitDateRange(
+        rest.first_at?.slice(0, 10) ?? null,
+        rest.latest_at?.slice(0, 10) ?? null
+      );
+      return {
+        ...rest,
+        period_from: days[0] ?? null,
+        period_to: days[days.length - 1] ?? null,
+        daily_counts: days.map((date) => ({ date, count: dailyCounts.get(date) ?? 0 }))
+      };
+    })
+    .sort((a, b) => b.count - a.count || (new Date(b.latest_at ?? 0).getTime() - new Date(a.latest_at ?? 0).getTime()));
+}
 
 const AI_PREFIX = "[AI Support]";
 
@@ -95,71 +193,6 @@ export function buildSupportTicketInsight(ticket: SupportTicket, messages: Suppo
     attachment_count: attachmentCount,
     latest_customer_message: latestCustomer
   };
-}
-
-export function buildSupportIssueStats(
-  tickets: Array<SupportTicket & { insight?: SupportTicketInsight }>
-): SupportIssueStat[] {
-  const stats = new Map<string, SupportIssueStat & { dailyCounts: Map<string, number> }>();
-
-  for (const ticket of tickets) {
-    const category = resolveTicketCategory(ticket);
-    const current = stats.get(category) ?? {
-      category,
-      count: 0,
-      open_count: 0,
-      needs_moderator_count: 0,
-      closed_count: 0,
-      solved_count: 0,
-      not_solved_count: 0,
-      latest_at: null,
-      first_at: null,
-      period_from: null,
-      period_to: null,
-      daily_counts: [],
-      sample_ticket_code: null,
-      sample_summary: "",
-      dailyCounts: new Map<string, number>()
-    };
-
-    current.count += 1;
-    if (["open", "accepted", "pending_user_resolution", "pending_follow_up"].includes(ticket.status)) current.open_count += 1;
-    if (ticket.insight?.dashboard_status === "Needs Moderator Review" || ticket.status === "open" || ticket.status === "accepted") current.needs_moderator_count += 1;
-    if (ticket.closed_at || ticket.status === "expired" || ticket.status.endsWith("_closed")) current.closed_count += 1;
-    if (ticket.status === "solved_closed") current.solved_count += 1;
-    if (ticket.status === "not_solved_closed") current.not_solved_count += 1;
-
-    const createdAt = ticket.created_at;
-    if (!current.first_at || new Date(createdAt).getTime() < new Date(current.first_at).getTime()) {
-      current.first_at = createdAt;
-    }
-    if (!current.latest_at || new Date(createdAt).getTime() > new Date(current.latest_at).getTime()) {
-      current.latest_at = createdAt;
-      current.sample_ticket_code = ticket.ticket_code ?? ticket.id.slice(0, 8);
-      current.sample_summary = ticket.insight?.summary ?? summarizeText(extractOriginalQuestion(ticket.opened_message_text) || ticket.opened_message_text, 120);
-    }
-
-    const dayKey = createdAt.slice(0, 10);
-    current.dailyCounts.set(dayKey, (current.dailyCounts.get(dayKey) ?? 0) + 1);
-
-    stats.set(category, current);
-  }
-
-  return [...stats.values()]
-    .map((stat) => {
-      const { dailyCounts, ...rest } = stat;
-      const days = splitDateRange(
-        rest.first_at?.slice(0, 10) ?? null,
-        rest.latest_at?.slice(0, 10) ?? null
-      );
-      return {
-        ...rest,
-        period_from: days[0] ?? null,
-        period_to: days[days.length - 1] ?? null,
-        daily_counts: days.map((date) => ({ date, count: dailyCounts.get(date) ?? 0 }))
-      };
-    })
-    .sort((a, b) => b.count - a.count || (new Date(b.latest_at ?? 0).getTime() - new Date(a.latest_at ?? 0).getTime()));
 }
 
 /** Same text classifier the bot uses, so dashboard stats and ticket metadata agree. */

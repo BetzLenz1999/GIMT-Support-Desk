@@ -357,8 +357,65 @@ export const AI_SUPPORT_CATEGORIES: readonly AiSupportCategory[] = AI_SUPPORT_TE
   (template) => template.category
 );
 
+/**
+ * Umbrella categories that exist only in reporting. A rollup is never emitted by
+ * the classifier; it aggregates the leaf categories listed in `includes`, so a
+ * ticket still belongs to exactly one leaf and that leaf's count is unchanged.
+ */
+export const SUPPORT_ROLLUPS = [
+  { category: "Swap Failed", includes: ["MiniPay GoodDapp Swap Failed"] }
+] as const;
+
+export type AiSupportRollupCategory = (typeof SUPPORT_ROLLUPS)[number]["category"];
+export type AiSupportReportCategory = AiSupportCategory | AiSupportRollupCategory;
+
+const ROLLUPS_BY_CATEGORY = new Map<string, readonly AiSupportCategory[]>(
+  SUPPORT_ROLLUPS.map((rollup) => [rollup.category, rollup.includes])
+);
+
+const ROLLUP_NAMES_BY_LEAF = new Map<AiSupportCategory, AiSupportRollupCategory[]>();
+for (const rollup of SUPPORT_ROLLUPS) {
+  for (const leaf of rollup.includes) {
+    const names = ROLLUP_NAMES_BY_LEAF.get(leaf) ?? [];
+    names.push(rollup.category);
+    ROLLUP_NAMES_BY_LEAF.set(leaf, names);
+  }
+}
+
+/**
+ * Report categories the dashboard can open: the classifier's leaves plus the
+ * reporting-only rollups, which is what the dropdown and report URLs accept.
+ */
+export const AI_SUPPORT_REPORT_CATEGORIES: readonly AiSupportReportCategory[] = [
+  ...AI_SUPPORT_CATEGORIES,
+  ...SUPPORT_ROLLUPS.map((rollup) => rollup.category)
+];
+
+/** Leaf categories a rollup aggregates, or null when the name is not a rollup. */
+export function supportRollupMembers(category: string): readonly AiSupportCategory[] | null {
+  return ROLLUPS_BY_CATEGORY.get(category) ?? null;
+}
+
+/** True when the category is a reporting-only rollup rather than a leaf. */
+export function isAiSupportRollupCategory(value: unknown): value is AiSupportRollupCategory {
+  return typeof value === "string" && ROLLUPS_BY_CATEGORY.has(value);
+}
+
+/**
+ * The rollups a leaf category rolls up into, so a single ticket can also be
+ * counted toward the umbrella categories without leaving its own stat.
+ */
+export function supportRollupsFor(category: AiSupportCategory): readonly AiSupportRollupCategory[] {
+  return ROLLUP_NAMES_BY_LEAF.get(category) ?? [];
+}
+
 export function isAiSupportCategory(value: unknown): value is AiSupportCategory {
   return typeof value === "string" && TEMPLATES_BY_CATEGORY.has(value as AiSupportCategory);
+}
+
+/** Accepts both classifier leaves and reporting-only rollups. */
+export function isAiSupportReportCategory(value: unknown): value is AiSupportReportCategory {
+  return isAiSupportCategory(value) || isAiSupportRollupCategory(value);
 }
 
 export function detectAiSupportTemplate(messageText: string, hasPhoto = false): AiSupportMatch {
