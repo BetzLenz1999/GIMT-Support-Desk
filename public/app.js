@@ -110,6 +110,13 @@ const state = {
     proof: [],
     activity: [],
     groupStats: []
+  },
+  issueReport: {
+    category: "",
+    from: "",
+    to: "",
+    data: null,
+    loading: false
   }
 };
 
@@ -125,6 +132,44 @@ const MEMBER_VIEWS = {
 function normalizeMemberView(value) {
   const key = String(value || "").toLowerCase();
   return MEMBER_VIEWS[key] ? key : "";
+}
+
+// Fallback only; the canonical list comes from the issue-report API so it cannot
+// drift from the classifier in src/lib/ai-support.ts.
+const ISSUE_CATEGORIES = [
+  "How to Claim G$",
+  "GoodWallet Claiming Failed",
+  "Cannot Claim G$",
+  "Face Verification Failed",
+  "Wallet Connection Issue",
+  "MiniPay GoodDapp Swap Failed",
+  "Gas Fee Issue",
+  "Importing Wallet / Importing G$ Token",
+  "Reward Not Received",
+  "Transaction Failed",
+  "General Failure / Error",
+  "Pending Case Follow-Up",
+  "User Provided Evidence",
+  "Unknown Issue"
+];
+
+let issueCategories = ISSUE_CATEGORIES.slice();
+
+async function loadIssueCategories() {
+  try {
+    const body = await fetchJson("/api/web/issue-report");
+    if (Array.isArray(body?.categories) && body.categories.length > 0) {
+      issueCategories = body.categories.filter((value) => typeof value === "string");
+    }
+  } catch (error) {
+    console.warn(`Falling back to the bundled issue category list: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  renderIssueCategoryOptions();
+}
+
+function normalizeIssueCategory(value) {
+  const raw = String(value || "").trim();
+  return issueCategories.includes(raw) ? raw : "";
 }
 
 // ---------- helpers ----------
@@ -1116,8 +1161,18 @@ function renderIssueStats(targetSelector, stats) {
     const dailySummary = dailyTotal
       ? daily.filter((day) => Number(day.count) > 0).map((day) => `${day.date}: ${day.count}`).join(" · ")
       : "No daily breakdown available";
+    // Each card opens that issue's own report URL (?issue=...&from=...&to=...),
+    // seeded with the period this category was reported over.
+    const from = stat.period_from || "";
+    const to = stat.period_to || stat.period_from || "";
+    const reportHref = buildIssueReportHref(stat.category, from, to);
     return `
-      <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm">
+      <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm issue-stat-card"
+           role="button" tabindex="0"
+           data-issue-category="${escapeHtml(stat.category)}"
+           data-issue-from="${escapeHtml(from)}"
+           data-issue-to="${escapeHtml(to)}"
+           aria-label="Open the ${escapeHtml(stat.category)} report from ${escapeHtml(period)}">
         <div class="flex items-start justify-between gap-3">
           <div>
             <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(stat.category)}</div>
@@ -1132,6 +1187,10 @@ function renderIssueStats(targetSelector, stats) {
         <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">Open: ${escapeHtml(stat.open_count)} · Needs moderator: ${escapeHtml(stat.needs_moderator_count)} · Closed: ${escapeHtml(stat.closed_count || 0)}</div>
         <div class="mt-2 text-xs text-slate-500 dark:text-slate-400"><strong>Daily:</strong> <span class="whitespace-pre-wrap">${escapeHtml(dailySummary)}</span></div>
         <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap">${escapeHtml(stat.sample_summary)}</div>
+        <div class="mt-2 flex items-center justify-between gap-2">
+          <span class="issue-stat-open">View report &rarr;</span>
+          <a href="${escapeHtml(reportHref)}" target="_blank" rel="noopener" class="text-[11px] text-slate-400 hover:underline" data-issue-link="1">Open in new tab</a>
+        </div>
       </div>
     `;
   }).join("");
@@ -1142,6 +1201,14 @@ function fmtReportDate(dateKey) {
   const parsed = new Date(`${String(dateKey).slice(0, 10)}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return String(dateKey);
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(parsed);
+}
+
+// Compact form for the per-day grid, e.g. "Sep 1".
+function fmtReportDateShort(dateKey) {
+  if (!dateKey) return "—";
+  const parsed = new Date(`${String(dateKey).slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return String(dateKey);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(parsed);
 }
 
 function renderIssueReportSummary(selector, report) {
@@ -1323,6 +1390,204 @@ async function loadTickets() {
   }
 }
 
+// ---------- Repeated Issue Report (own page per issue) ----------
+//
+// Each repeated issue is reachable at its own URL, e.g.
+//   /?issue=MiniPay+GoodDapp+Swap+Failed&from=2025-09-01&to=2025-09-02
+// so the date range travelled with the link and the report is shareable as-is.
+// Tabs are used instead of separate HTML files so the single static entry point
+// keeps working on both Vercel and Netlify without extra rewrites.
+
+// Dates default to the last 7 UTC days, matching the cron report window.
+function defaultIssueRange() {
+  return defaultMemberRange();
+}
+
+function getIssueUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    category: normalizeIssueCategory(params.get("issue") || params.get("category")),
+    from: params.get("from") || "",
+    to: params.get("to") || ""
+  };
+}
+
+function buildIssueReportHref(category, from, to) {
+  const params = new URLSearchParams();
+  params.set("issue", category);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  return `${window.location.pathname}?${params.toString()}`;
+}
+
+function updateIssueUrlParams({ category, from, to, replace = false }) {
+  const url = new URL(window.location.href);
+  if (category) {
+    url.searchParams.set("issue", category);
+    if (from) url.searchParams.set("from", from); else url.searchParams.delete("from");
+    if (to) url.searchParams.set("to", to); else url.searchParams.delete("to");
+    // Issue and member routes are mutually exclusive; drop the member params so
+    // a shared link does not open two pages at once.
+    url.searchParams.delete("member");
+    url.searchParams.delete("view");
+  } else {
+    url.searchParams.delete("issue");
+    // from/to are shared by the member and issue routes; only clear them when no
+    // other route still owns the window.
+    if (!url.searchParams.get("member")) {
+      url.searchParams.delete("from");
+      url.searchParams.delete("to");
+    }
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (replace) window.history.replaceState({}, "", next);
+  else window.history.pushState({}, "", next);
+}
+
+function renderIssueCategoryOptions() {
+  const select = $("#issue-category");
+  if (!select) return;
+  const current = state.issueReport.category;
+  select.innerHTML = ['<option value="">Select an issue…</option>']
+    .concat(issueCategories.map((category) =>
+      `<option value="${escapeHtml(category)}"${category === current ? " selected" : ""}>${escapeHtml(category)}</option>`
+    ))
+    .join("");
+  select.value = current;
+}
+
+function openIssueReport(category, from, to, opts = {}) {
+  const normalized = normalizeIssueCategory(category);
+  if (!normalized) return;
+  const fallback = defaultIssueRange();
+  state.issueReport.category = normalized;
+  state.issueReport.from = from || fallback.from;
+  state.issueReport.to = to || fallback.to;
+  updateIssueUrlParams({
+    category: normalized,
+    from: state.issueReport.from,
+    to: state.issueReport.to,
+    replace: Boolean(opts.replace)
+  });
+  switchTab("issue-report");
+}
+
+function renderIssueReportHeader() {
+  const { category, from, to } = state.issueReport;
+  $("#issue-report-title").textContent = category ? `${category} — Report` : "Repeated Issue Report";
+  $("#issue-report-period").textContent =
+    from && to
+      ? `Reporting period: ${fmtReportDate(from)} to ${fmtReportDate(to)} (UTC)`
+      : "";
+  $("#issue-from").value = from;
+  $("#issue-to").value = to;
+  renderIssueCategoryOptions();
+}
+
+function renderIssueReportPage(report) {
+  const summary = $("#issue-report-summary");
+  const daily = $("#issue-report-daily");
+  const tbody = $("#issue-report-body");
+
+  if (!report) {
+    summary.innerHTML = "";
+    daily.innerHTML = "";
+    tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">Pick an issue to see its report.</td></tr>';
+    $("#issue-report-count").textContent = "";
+    return;
+  }
+
+  const cards = [
+    { label: "Total reports", value: report.total_tickets, tone: "text-teal-700 dark:text-teal-300" },
+    { label: "Open", value: report.open_count, tone: "text-amber-600 dark:text-amber-400" },
+    { label: "Closed", value: report.closed_count, tone: "text-slate-700 dark:text-slate-200" },
+    { label: "Busiest day", value: report.busiest_day ? `${report.busiest_day.count} on ${fmtReportDateShort(report.busiest_day.date)}` : "—", tone: "text-slate-700 dark:text-slate-200" }
+  ];
+  summary.innerHTML = cards.map((card) => `
+    <div class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 shadow-sm">
+      <div class="text-[10px] uppercase tracking-wide text-slate-400">${escapeHtml(card.label)}</div>
+      <div class="mt-1 text-lg font-bold ${card.tone}">${escapeHtml(card.value)}</div>
+    </div>
+  `).join("");
+
+  const days = Array.isArray(report.daily_counts) ? report.daily_counts : [];
+  daily.innerHTML = days.length
+    ? days.map((day) => `
+        <div class="issue-day-cell${Number(day.count) > 0 ? " has-reports" : ""}">
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">${escapeHtml(fmtReportDateShort(day.date))}</div>
+          <div class="text-sm font-semibold">${escapeHtml(day.count)}</div>
+        </div>
+      `).join("")
+    : '<p class="text-xs text-slate-500 dark:text-slate-400">No daily breakdown for this period.</p>';
+
+  const rows = Array.isArray(report.tickets) ? report.tickets : [];
+  tbody.innerHTML = rows.length
+    ? rows.map((ticket) => {
+        const status = pill(TICKET_STATUS_PILL[ticket.status] || "pill-slate", TICKET_STATUS_LABEL[ticket.status] || ticket.status);
+        return `
+          <tr>
+            <td class="mono ticket-cell-nowrap font-semibold">#${escapeHtml(ticket.ticket_code || String(ticket.id).slice(0, 8))}</td>
+            <td class="mono ticket-cell-nowrap">
+              <div>${escapeHtml(fmtTimeUtc(ticket.created_at))}</div>
+              <div class="text-[10px] text-slate-400">${escapeHtml(fmtRelative(ticket.created_at))}</div>
+            </td>
+            <td class="ticket-cell-nowrap">${escapeHtml(ticket.group_title || (ticket.telegram_chat_id ? `Chat ${ticket.telegram_chat_id}` : "—"))}</td>
+            <td class="ticket-cell-nowrap">${escapeHtml(ticket.opened_by_name)}</td>
+            <td>${status}</td>
+            <td class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(ticket.summary || "—")}</td>
+          </tr>
+        `;
+      }).join("")
+    : '<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">No tickets of this issue in the selected period.</td></tr>';
+
+  const activeDays = days.filter((day) => Number(day.count) > 0).length;
+  $("#issue-report-count").textContent =
+    `${rows.length} ticket${rows.length === 1 ? "" : "s"} · reported on ${activeDays} of ${days.length} day${days.length === 1 ? "" : "s"} in this period`;
+}
+
+async function loadIssueReport() {
+  const { category, from, to } = state.issueReport;
+  renderIssueReportHeader();
+  if (!category) {
+    renderIssueReportPage(null);
+    return;
+  }
+
+  state.issueReport.loading = true;
+  $("#issue-report-body").innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">Loading report…</td></tr>';
+
+  const qs = new URLSearchParams({ category });
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+
+  try {
+    const data = await fetchJson(`/api/web/issue-report?${qs.toString()}`);
+    state.issueReport.data = data.report || null;
+    // The API echoes the resolved window, which may differ from what was asked
+    // for (e.g. a clamped or swapped range) — keep the URL truthful.
+    if (data.report) {
+      state.issueReport.from = data.report.range_from;
+      state.issueReport.to = data.report.range_to;
+      updateIssueUrlParams({
+        category: state.issueReport.category,
+        from: state.issueReport.from,
+        to: state.issueReport.to,
+        replace: true
+      });
+    }
+    renderIssueReportHeader();
+    renderIssueReportPage(state.issueReport.data);
+  } catch (error) {
+    state.issueReport.data = null;
+    $("#issue-report-body").innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-red-600 dark:text-red-400">Failed to load report: ${escapeHtml(error.message)}</td></tr>`;
+    $("#issue-report-summary").innerHTML = "";
+    $("#issue-report-daily").innerHTML = "";
+    $("#issue-report-count").textContent = "";
+  } finally {
+    state.issueReport.loading = false;
+  }
+}
+
 // ---------- Member Profile (per-member focused page) ----------
 
 function toIsoDate(date) {
@@ -1353,11 +1618,17 @@ function updateMemberUrlParams({ memberId, from, to, view = "", replace = false 
     if (to) url.searchParams.set("to", to); else url.searchParams.delete("to");
     const normalizedView = normalizeMemberView(view);
     if (normalizedView) url.searchParams.set("view", normalizedView); else url.searchParams.delete("view");
+    // Issue and member routes are mutually exclusive; drop the issue params so a
+    // shared link does not open two pages at once.
+    url.searchParams.delete("issue");
   } else {
     url.searchParams.delete("member");
-    url.searchParams.delete("from");
-    url.searchParams.delete("to");
     url.searchParams.delete("view");
+    // from/to are shared with the issue-report route; keep them if that route owns them.
+    if (!url.searchParams.get("issue")) {
+      url.searchParams.delete("from");
+      url.searchParams.delete("to");
+    }
   }
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (replace) window.history.replaceState({}, "", next);
@@ -1440,7 +1711,7 @@ function applyMemberProfileView() {
       banner.classList.add("hidden");
     }
   }
-  for (const btn of $all(".member-share-btn")) {
+  for (const btn of $all(".member-share-btn[data-share-view]")) {
     btn.classList.toggle("is-active", btn.dataset.shareView === view);
   }
 }
@@ -1724,11 +1995,16 @@ function switchTab(name) {
   for (const panel of $all("[data-tab-panel]")) {
     panel.classList.toggle("active", panel.dataset.tabPanel === name);
   }
+  // Leaving the member page always clears its state; updateMemberUrlParams keeps
+  // the shared from/to window when the issue report now owns it.
   if (name !== "member" && previousTab === "member") {
     state.memberProfile.memberId = null;
     state.memberProfile.view = "";
     updateMemberUrlParams({ memberId: null });
     showMemberTabButton(false);
+  }
+  if (name !== "issue-report" && previousTab === "issue-report") {
+    updateIssueUrlParams({ category: "" });
   }
   refreshCurrent();
 }
@@ -1741,6 +2017,7 @@ function refreshCurrent() {
   else if (state.currentTab === "proof") loadProof();
   else if (state.currentTab === "tickets") loadTickets();
   else if (state.currentTab === "ticket-search") loadTicketSearch();
+  else if (state.currentTab === "issue-report") loadIssueReport();
   else if (state.currentTab === "member") loadMemberProfile();
 }
 
@@ -1779,6 +2056,7 @@ async function init() {
   $("#ticket-search-member").setAttribute("data-members-select", "1");
 
   try { await loadMembers(); } catch (error) { console.warn("Failed to load members", error); }
+  try { await loadIssueCategories(); } catch (error) { console.warn("Failed to load issue categories", error); }
 
   // Tabs
   for (const btn of $all(".tab-btn")) {
@@ -1876,8 +2154,55 @@ async function init() {
   $("#member-copy-link").addEventListener("click", copyMemberShareLink);
   $("#member-back-btn").addEventListener("click", () => switchTab("home"));
 
+  // Repeated issue report page (reachable at its own ?issue=... URL).
+  $("#issue-category").addEventListener("change", (e) => {
+    const category = normalizeIssueCategory(e.target.value);
+    if (!category) {
+      state.issueReport.category = "";
+      updateIssueUrlParams({ category: "", replace: true });
+      switchTab("tickets");
+      return;
+    }
+    openIssueReport(category, state.issueReport.from, state.issueReport.to);
+  });
+  $("#issue-from").addEventListener("change", (e) => {
+    state.issueReport.from = e.target.value;
+    updateIssueUrlParams({
+      category: state.issueReport.category,
+      from: state.issueReport.from,
+      to: state.issueReport.to,
+      replace: true
+    });
+    loadIssueReport();
+  });
+  $("#issue-to").addEventListener("change", (e) => {
+    state.issueReport.to = e.target.value;
+    updateIssueUrlParams({
+      category: state.issueReport.category,
+      from: state.issueReport.from,
+      to: state.issueReport.to,
+      replace: true
+    });
+    loadIssueReport();
+  });
+  $("#issue-copy-link").addEventListener("click", () => {
+    copyTextToButton(window.location.href, $("#issue-copy-link"));
+  });
+  $("#issue-back-btn").addEventListener("click", () => {
+    updateIssueUrlParams({ category: "", replace: true });
+    switchTab("tickets");
+  });
+  // Space/Enter should open the report when a card has focus.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const card = e.target.closest && e.target.closest("[data-issue-category]");
+    if (!card) return;
+    e.preventDefault();
+    openIssueReport(card.dataset.issueCategory, card.dataset.issueFrom, card.dataset.issueTo);
+  });
+
   // Per-section "copy link" buttons (Support Tickets / Proof / Activity / Stats).
-  for (const btn of $all(".member-share-btn")) {
+  for (const btn of $all(".member-share-btn[data-share-view]")) {
     btn.addEventListener("click", () => {
       const view = normalizeMemberView(btn.dataset.shareView);
       if (!view || !state.memberProfile.memberId) return;
@@ -1899,6 +2224,14 @@ async function init() {
   });
 
   window.addEventListener("popstate", () => {
+    const issueParams = getIssueUrlParams();
+    if (issueParams.category) {
+      state.issueReport.category = issueParams.category;
+      state.issueReport.from = issueParams.from;
+      state.issueReport.to = issueParams.to;
+      switchTab("issue-report");
+      return;
+    }
     const params = getMemberUrlParams();
     if (params.memberId) {
       const range = (params.from && params.to)
@@ -1935,6 +2268,17 @@ async function init() {
 
   // Global delegated click handler for member links + week toggles + modal close
   document.addEventListener("click", (e) => {
+    // Clicking a repeated-issue card opens that issue's own report URL.
+    const issueCard = e.target.closest("[data-issue-category]");
+    if (issueCard) {
+      // The card also contains a real link ("Open in new tab"); let the browser
+      // handle that one so middle-click and copy-link still behave normally.
+      if (e.target.closest("[data-issue-link]")) return;
+      e.preventDefault();
+      openIssueReport(issueCard.dataset.issueCategory, issueCard.dataset.issueFrom, issueCard.dataset.issueTo);
+      return;
+    }
+
     const ticketToggle = e.target.closest(".ticket-history-toggle");
     if (ticketToggle) {
       e.preventDefault();
@@ -1978,9 +2322,28 @@ async function init() {
     if (e.key === "Escape" && state.memberDetail.open) closeMemberDetail();
   });
 
-  // Initial route: if URL has ?member=..., open Member Profile directly so the shareable link works.
+  // Initial route. The issue report owns its own URL (?issue=...&from=...&to=...)
+  // so a shared report link opens straight to that report.
+  const initialIssue = getIssueUrlParams();
   const initialUrl = getMemberUrlParams();
-  if (initialUrl.memberId) {
+  if (initialIssue.category) {
+    const range = (initialIssue.from && initialIssue.to)
+      ? { from: initialIssue.from, to: initialIssue.to }
+      : defaultIssueRange();
+    state.issueReport.category = initialIssue.category;
+    state.issueReport.from = range.from;
+    state.issueReport.to = range.to;
+    if (!initialIssue.from || !initialIssue.to) {
+      updateIssueUrlParams({
+        category: initialIssue.category,
+        from: range.from,
+        to: range.to,
+        replace: true
+      });
+    }
+    switchTab("issue-report");
+  } else if (initialUrl.memberId) {
+    // ?member=... opens Member Profile directly so the shareable link works.
     const range = (initialUrl.from && initialUrl.to)
       ? { from: initialUrl.from, to: initialUrl.to }
       : defaultMemberRange();

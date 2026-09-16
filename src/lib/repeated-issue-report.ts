@@ -1,5 +1,5 @@
 import { listSupportTicketsInRange } from "./repository.js";
-import { buildSupportIssueStats, splitDateRange, type SupportIssueStat } from "./support-insights.js";
+import { buildSupportIssueStats, resolveTicketCategory, splitDateRange, type SupportIssueDailyCount, type SupportIssueStat, type SupportTicketInsight } from "./support-insights.js";
 import { utcDateKey } from "./time.js";
 import type { SupabaseRestClient, SupportTicket } from "./supabase.js";
 
@@ -172,6 +172,149 @@ export function formatRepeatedIssueReportText(report: RepeatedIssueReport): stri
 
 function dayWord(days: number): string {
   return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/** One row in a single-issue report's ticket list. */
+export type IssueReportTicket = {
+  id: string;
+  ticket_code: string | null;
+  created_at: string;
+  status: string;
+  opened_by_name: string;
+  group_title: string | null;
+  telegram_chat_id: number | null;
+  summary: string;
+};
+
+/**
+ * A single repeated issue expanded over its own date range, e.g.
+ * "MiniPay GoodDapp Swap Failed" from 2025-09-01 to 2025-09-02. Unlike the
+ * whole-report summary, `daily_counts` covers every day in the window so days
+ * with zero reports are visible rather than missing.
+ */
+export type IssueReport = {
+  generated_at: string;
+  category: string;
+  range_from: string;
+  range_to: string;
+  range_days: number;
+  total_tickets: number;
+  open_count: number;
+  closed_count: number;
+  solved_count: number;
+  not_solved_count: number;
+  first_at: string | null;
+  latest_at: string | null;
+  daily_counts: SupportIssueDailyCount[];
+  busiest_day: SupportIssueDailyCount | null;
+  tickets: IssueReportTicket[];
+};
+
+const OPEN_STATUSES = ["open", "accepted", "pending_user_resolution", "pending_follow_up"];
+
+export function isOpenTicketStatus(status: string): boolean {
+  return OPEN_STATUSES.includes(status);
+}
+
+function toIssueReportTicket(ticket: SupportTicket & { insight?: SupportTicketInsight }): IssueReportTicket {
+  return {
+    id: ticket.id,
+    ticket_code: ticket.ticket_code,
+    created_at: ticket.created_at,
+    status: ticket.status,
+    opened_by_name: ticket.opened_by_name,
+    group_title: ticket.group_title,
+    telegram_chat_id: ticket.telegram_chat_id ?? null,
+    summary: ticket.insight?.summary ?? ""
+  };
+}
+
+/**
+ * Builds the per-issue report the dashboard links to. Tickets are matched with
+ * the same classifier the bot uses, then scoped to the requested window.
+ */
+export function buildIssueReport(
+  category: string,
+  tickets: Array<SupportTicket & { insight?: SupportTicketInsight }>,
+  window: RepeatedIssueReportWindow
+): IssueReport {
+  const { rangeFrom, rangeTo } = window;
+  const days = splitDateRange(rangeFrom, rangeTo);
+
+  const matched = tickets.filter((ticket) => {
+    if (resolveTicketCategory(ticket) !== category) return false;
+    const day = ticket.created_at.slice(0, 10);
+    return day >= rangeFrom && day <= rangeTo;
+  });
+
+  const countsByDay = new Map<string, number>();
+  for (const ticket of matched) {
+    const day = ticket.created_at.slice(0, 10);
+    countsByDay.set(day, (countsByDay.get(day) ?? 0) + 1);
+  }
+
+  const dailyCounts = days.map((date) => ({ date, count: countsByDay.get(date) ?? 0 }));
+  const busiestDay = dailyCounts.reduce<SupportIssueDailyCount | null>(
+    (best, day) => (day.count > 0 && (!best || day.count > best.count) ? day : best),
+    null
+  );
+
+  const createdTimes = matched.map((ticket) => ticket.created_at).sort();
+  const statuses = matched.map((ticket) => ticket.status);
+
+  return {
+    generated_at: window.reportDate.toISOString(),
+    category,
+    range_from: rangeFrom,
+    range_to: rangeTo,
+    range_days: days.length,
+    total_tickets: matched.length,
+    open_count: statuses.filter(isOpenTicketStatus).length,
+    closed_count: matched.filter((ticket) => Boolean(ticket.closed_at) || ticket.status === "expired" || ticket.status.endsWith("_closed")).length,
+    solved_count: statuses.filter((status) => status === "solved_closed").length,
+    not_solved_count: statuses.filter((status) => status === "not_solved_closed").length,
+    first_at: createdTimes[0] ?? null,
+    latest_at: createdTimes[createdTimes.length - 1] ?? null,
+    daily_counts: dailyCounts,
+    busiest_day: busiestDay,
+    tickets: matched
+      .map(toIssueReportTicket)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
+  };
+}
+
+/**
+ * Loads every ticket in the window from the database and narrows it to one
+ * issue, so a shared report link works without the dashboard's current filters.
+ */
+export async function loadIssueReport(
+  db: SupabaseRestClient,
+  category: string,
+  reportDate = new Date(),
+  options: { days?: number; rangeFrom?: string | null; rangeTo?: string | null } = {}
+): Promise<IssueReport> {
+  const window = resolveExplicitReportWindow(reportDate, options.rangeFrom, options.rangeTo, options.days ?? DEFAULT_RANGE_DAYS);
+  const tickets = await listSupportTicketsInRange(db, window.rangeFrom, window.rangeTo);
+  return buildIssueReport(category, tickets, window);
+}
+
+/** Plain-text version of a single-issue report, for copy/paste or Telegram. */
+export function formatIssueReportText(report: IssueReport): string {
+  const lines: string[] = [];
+  lines.push(`Issue Report: ${report.category}`);
+  lines.push(`Period: ${formatReportDate(report.range_from)} to ${formatReportDate(report.range_to)} (${dayWord(report.range_days)})`);
+  lines.push(`Total reports: ${report.total_tickets}`);
+  lines.push(`Open: ${report.open_count} · Closed: ${report.closed_count}`);
+  if (report.busiest_day) {
+    lines.push(`Busiest day: ${formatReportDate(report.busiest_day.date)} (${report.busiest_day.count})`);
+  }
+  const activeDays = report.daily_counts.filter((day) => day.count > 0);
+  lines.push(
+    activeDays.length
+      ? `Daily: ${activeDays.map((day) => `${day.date}: ${day.count}`).join(" · ")}`
+      : "Daily: no reports in this period"
+  );
+  return lines.join("\n");
 }
 
 function topDays(category: RepeatedIssueReportRow, maxDays: number): Array<{ date: string; count: number }> {
