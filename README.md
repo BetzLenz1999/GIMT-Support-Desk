@@ -224,6 +224,10 @@ Issues by total reports:
 • MiniPay GoodDapp Swap Failed — 12 total (2 today, 4 open)
    Report period: September 1, 2025 to September 7, 2025
    Busiest days: 2025-09-03: 4 · 2025-09-05: 3 · 2025-09-02: 2
+• Swap Failed — 12 total (2 today, 4 open)
+   Includes: MiniPay GoodDapp Swap Failed
+   Report period: September 1, 2025 to September 7, 2025
+   Busiest days: 2025-09-03: 4 · 2025-09-05: 3 · 2025-09-02: 2
 ```
 
 The run is recorded in `activity_logs` as `REPEATED_ISSUE_REPORT`, and the last delivered report date is stored in `app_settings.repeated_issue_report_last_date` so the cron never double-posts on the same UTC day.
@@ -241,6 +245,16 @@ curl "https://<your-deployment>/api/cron/repeated-issue-report?from=2025-09-01&t
 ### Detection coverage
 
 User reports about `swap`, generic `failed`/`error` messages, `verification failed`, and `cannot claim` are classified into the AI support categories before they reach the report. Common misspellings (`fialed`, `faild`, `eror`, `verificationfailed`) and Tagalog variants (`hindi maka swap`, `di maka claim`, `hindi ma verify`, `ayaw gumana`) map to the same categories as their correct-English equivalents. Generic failure text that does not match a specific category falls into `General Failure / Error` and is flagged for moderator review. Tickets created before the AI flow are classified with the same rules at report time, so historical rows appear in the report without backfilling.
+
+### Rollup categories
+
+`Swap Failed` is a reporting-only umbrella for the overall complaints view. It is not produced by the classifier; it aggregates the swap-specific categories it lists in `includes` (currently `MiniPay GoodDapp Swap Failed`). This is what keeps counting consistent:
+
+- The classifier still files every swap ticket under `MiniPay GoodDapp Swap Failed`, so that category's own total, status split, report period, and `daily_counts` are exactly what they were before the rollup was added.
+- The umbrella row counts the same tickets again under `Swap Failed`, so its total always equals the sum of its member categories and answers "how many swap-failed complaints overall".
+- Rollup rows overlap leaf rows by design and are never added to the leaf totals; the number of tickets in the period is unchanged.
+
+The umbrella is available everywhere a category is: the dashboard dropdown and per-issue report links (`/?issue=Swap+Failed&from=…&to=…`), the daily Telegram report, and `/api/web/issue-report?category=Swap%20Failed`. Rows carrying the rollup are marked with `is_rollup: true` and their member list in `includes`, and both the plain-text report and the dashboard card render an `Includes: MiniPay GoodDapp Swap Failed` line so a reader can tell the umbrella total from the leaf total. Adding another member category later is a one-line change to `SUPPORT_ROLLUPS` in `src/lib/ai-support.ts`.
 
 ## In-group support ticket workflow
 

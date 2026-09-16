@@ -1,4 +1,4 @@
-import { AI_SUPPORT_CATEGORIES, isAiSupportCategory } from "../../src/lib/ai-support.js";
+import { AI_SUPPORT_REPORT_CATEGORIES, isAiSupportReportCategory } from "../../src/lib/ai-support.js";
 import { loadIssueReport } from "../../src/lib/repeated-issue-report.js";
 import { getSupabase } from "../../src/lib/supabase.js";
 
@@ -24,11 +24,11 @@ export default async function handler(request: any, response: any) {
     // No category means "list the options", which keeps the dashboard dropdown
     // in sync with the classifier instead of duplicating the list in app.js.
     if (!category.trim()) {
-      sendJson(response, 200, { ok: true, categories: AI_SUPPORT_CATEGORIES, report: null });
+      sendJson(response, 200, { ok: true, categories: AI_SUPPORT_REPORT_CATEGORIES, report: null });
       return;
     }
-    if (!isAiSupportCategory(category)) {
-      sendJson(response, 404, { ok: false, error: `Unknown issue category: ${category}`, categories: AI_SUPPORT_CATEGORIES });
+    if (!isAiSupportReportCategory(category)) {
+      sendJson(response, 404, { ok: false, error: `Unknown issue category: ${category}`, categories: AI_SUPPORT_REPORT_CATEGORIES });
       return;
     }
 

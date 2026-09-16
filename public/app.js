@@ -135,13 +135,16 @@ function normalizeMemberView(value) {
 }
 
 // Fallback only; the canonical list comes from the issue-report API so it cannot
-// drift from the classifier in src/lib/ai-support.ts.
+// drift from the classifier in src/lib/ai-support.ts. "Swap Failed" is a
+// reporting-only rollup that includes MiniPay GoodDapp Swap Failed, so both the
+// umbrella total and the leaf count are shown.
 const ISSUE_CATEGORIES = [
   "How to Claim G$",
   "GoodWallet Claiming Failed",
   "Cannot Claim G$",
   "Face Verification Failed",
   "Wallet Connection Issue",
+  "Swap Failed",
   "MiniPay GoodDapp Swap Failed",
   "Gas Fee Issue",
   "Importing Wallet / Importing G$ Token",
@@ -1161,6 +1164,9 @@ function renderIssueStats(targetSelector, stats) {
     const dailySummary = dailyTotal
       ? daily.filter((day) => Number(day.count) > 0).map((day) => `${day.date}: ${day.count}`).join(" · ")
       : "No daily breakdown available";
+    const includes = Array.isArray(stat.includes) && stat.includes.length
+      ? `<div class="mt-1 text-[11px] text-slate-400">Includes: ${escapeHtml(stat.includes.join(", "))}</div>`
+      : "";
     // Each card opens that issue's own report URL (?issue=...&from=...&to=...),
     // seeded with the period this category was reported over.
     const from = stat.period_from || "";
@@ -1176,6 +1182,7 @@ function renderIssueStats(targetSelector, stats) {
         <div class="flex items-start justify-between gap-3">
           <div>
             <div class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(stat.category)}</div>
+            ${includes}
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Report date: ${escapeHtml(period)}</div>
             <div class="mt-1 text-[11px] text-slate-400">Latest: ${escapeHtml(fmtTimeUtc(stat.latest_at))}${stat.sample_ticket_code ? ` · #${escapeHtml(stat.sample_ticket_code)}` : ""}</div>
           </div>
