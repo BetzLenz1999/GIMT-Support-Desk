@@ -272,6 +272,62 @@ Backend-only flow:
 
 Support ticket history is intentionally independent from attendance and activity history. Non-registered requesters are not counted in team stats, while registered team members’ ordinary group replies can still be counted in `group_message_stats` as normal team activity. The dashboard has a **Support Tickets** tab for reviewing assigned responders, scheduled-duty owners, and off-duty coverage handoffs.
 
+## Self-service handled-ticket count
+
+A registered member can ask the bot how many tickets they handled, and the bot answers in the main group (`TEAM_GROUP_CHAT_ID`) with the exact count from `public.support_tickets`. There is no new table, no schema change, and no language model involved — the answer is computed from real rows, so the numbers are verifiable.
+
+Two ways to ask:
+
+```text
+/mystats
+/mytickets
+```
+
+or plain language, in English or Tagalog:
+
+```text
+How many tickets did I handle today?
+ilang ticket ang na-handle ko kahapon
+how many tickets have I handled last week
+/mytickets September 1 2025
+```
+
+Example reply:
+
+```text
+🎫 Handled Tickets — Pablo
+Period: September 1, 2025
+Total handled: 3
+Open: 1 · Closed: 2
+
+By issue:
+• MiniPay GoodDapp Swap Failed — 2
+• Cannot Claim G$ — 1
+
+Counts tickets assigned to you (open date inside the period).
+```
+
+Accepted date expressions:
+
+- `today`, `yesterday`, `kahapon`, `last 7 days`, `last week`, `this week`
+- `September 1`, `Sep 1 2025`, `2025-09-01`
+- ranges: `Sep 1 to 7 2025`, `September 1 to October 3 2025`, `2025-09-01 to 2025-09-07`
+
+When no date is given the default is today. A bare month and day resolves to the current year, stepping back one year when that date would fall in the future. Ranges may cross the new year (`December 20 to January 5`).
+
+How the count is defined:
+
+- **Handled** means the ticket's assigned handler (`assigned_member_id`), which is the responder the dashboard shows. Tickets scheduled to a member but never picked up by anyone are not counted.
+- The window filters on the ticket's **open date** (`created_at`), matching how the repeated-issue report scopes tickets, so the two views reconcile.
+- `Open` counts statuses `open`, `accepted`, `pending_user_resolution`, and `pending_follow_up`. `Closed` counts `solved_closed`, `not_solved_closed`, `closed_by_team`, and `expired`.
+- Issues are categorised with the same classifier the dashboard uses (`resolveTicketCategory`), and the reply lists up to 8 categories.
+
+Scope and privacy:
+
+- Members can only ask about **themselves**. Asking about a teammate (for example, *"how many tickets for Pablo"*) gets a short notice that only self-stats are available; no other member's numbers are shown.
+- The answer is posted only in the **main group**. In other groups the explicit `/mystats` command replies that stats live in the main team group, and natural-language asks are ignored so public groups are unaffected.
+- If `TEAM_GROUP_CHAT_ID` is unset, the bot falls back to the chat ID it stored in `public.app_settings` (key `team_group_chat_id`) to decide which group is the main one.
+
 ## Group chat activity analytics
 
 When `TEAM_GROUP_CHAT_ID` is configured, the bot keeps a daily counter of how many messages each registered team member sends in the team group. Counts are stored in `public.group_message_stats` (one row per `(member_id, telegram_chat_id, work_date_utc)`) and incremented atomically via the SQL function `public.increment_group_message_count`. Rows are never deleted, so the table acts as a permanent, per-day activity log you can query directly in Supabase.
