@@ -299,20 +299,6 @@ async function trackGroupMessage(
 
   await rememberTelegramGroup(db, message.chat);
 
-  // A registered member asking for their own handled-ticket count is answered
-  // only in the main group. This runs before the saved-command playback so an
-  // unknown /mystats command is not swallowed silently.
-  if (await tryReplyWithSelfTicketStats(db, message, registration)) return;
-
-  if (isSaveCommand(message)) {
-    await runSaveCommandSafely(db, message, registration);
-    return;
-  }
-
-  if (await runSavedCommandPlaybackSafely(db, message, registration)) {
-    return;
-  }
-
   let envChatId: number | undefined;
   try {
     envChatId = getTeamGroupChatId();
@@ -327,14 +313,35 @@ async function trackGroupMessage(
     console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS", error);
   }
 
-  const now = message.date ? new Date(message.date * 1000) : new Date();
-
+  // Resolve the main group before answering self-stats. When TEAM_GROUP_CHAT_ID
+  // is unset this records or inherits the stored chat ID, so the reply is
+  // correctly restricted to the main group on the very first message that asks.
   if (shouldCountStats) {
     if (envChatId === undefined) {
       await rememberTeamGroupChatId(db, message.chat.id);
     } else if (envChatId === message.chat.id) {
       await rememberTeamGroupChatId(db, message.chat.id, { force: true });
-    } else {
+    }
+  }
+
+  // A registered member asking for their own handled-ticket count is answered
+  // only in the main group. This runs before the saved-command playback so an
+  // unknown /mystats command is not swallowed silently.
+  if (await tryReplyWithSelfTicketStats(db, message, registration)) return;
+
+  if (isSaveCommand(message)) {
+    await runSaveCommandSafely(db, message, registration);
+    return;
+  }
+
+  if (await runSavedCommandPlaybackSafely(db, message, registration)) {
+    return;
+  }
+
+  const now = message.date ? new Date(message.date * 1000) : new Date();
+
+  if (shouldCountStats) {
+    if (envChatId !== undefined && envChatId !== message.chat.id) {
       const key = `${message.chat.id}->${envChatId}`;
       if (!trackGroupMessageWarnings.envMismatchLogged.has(key)) {
         trackGroupMessageWarnings.envMismatchLogged.add(key);
