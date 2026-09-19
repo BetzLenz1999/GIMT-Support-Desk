@@ -39,6 +39,7 @@ import {
 import {
   clearGroupActionMessages,
   getStatsGroupChatIds,
+  getStoredTeamGroupChatId,
   getTeamGroupChatId,
   isStatsGroupEnabled,
   rememberTeamGroupChatId,
@@ -49,6 +50,13 @@ import { getTeamMember, TEAM_SCHEDULE, type TeamMember } from "./team-schedule.j
 import { answerCallbackQuery, copyMessage, deleteMessage, downloadFile, editMessageText, getChatMember, getFile, sendMessage, type SentTelegramMessage } from "./telegram.js";
 import type { TelegramCallbackQuery, TelegramChat, TelegramChatMemberUpdated, TelegramMessage, TelegramUpdate, TelegramUser } from "./telegram-types.js";
 import { getSupportMode, isTeamInboxEnabled, TEAM_INBOX_PRIMARY_GRACE_MINUTES } from "./config.js";
+import {
+  buildMemberTicketStats,
+  formatMemberTicketStatsReply,
+  formatSelfOnlyNotice,
+  isSelfTicketStatsCommand,
+  parseSelfTicketStatsRequest
+} from "./member-ticket-stats.js";
 import { detectAiSupportTemplate, type AiSupportDashboardStatus, type AiSupportMatch } from "./ai-support.js";
 import { isBeforeScheduledTime, calculateEarlyOutMinutes, calculateLateMinutes, calculateOvertimeMinutes, formatDuration, formatLocal, formatUtc, getRelevantShiftWindow, getShiftProgress, getShiftWindowForDate, signedMinutesBetween, utcDateKey } from "./time.js";
 
@@ -291,6 +299,11 @@ async function trackGroupMessage(
 
   await rememberTelegramGroup(db, message.chat);
 
+  // A registered member asking for their own handled-ticket count is answered
+  // only in the main group. This runs before the saved-command playback so an
+  // unknown /mystats command is not swallowed silently.
+  if (await tryReplyWithSelfTicketStats(db, message, registration)) return;
+
   if (isSaveCommand(message)) {
     await runSaveCommandSafely(db, message, registration);
     return;
@@ -348,6 +361,82 @@ async function trackGroupMessage(
   await recordTeamTicketReplyIfReferenced(db, message, registration);
 }
 
+/**
+ * Answers a registered member's self-stats question inside the main group only.
+ * Returns true when the message was handled so the caller stops processing it.
+ * Any failure is logged and returns false, leaving normal group handling intact.
+ */
+async function tryReplyWithSelfTicketStats(
+  db: SupabaseRestClient,
+  message: TelegramMessage,
+  registration: Registration
+): Promise<boolean> {
+  const text = message.text?.trim() ?? "";
+  if (!text) return false;
+
+  const isCommand = isSelfTicketStatsCommand(text);
+
+  let selfChatId: number | undefined;
+  try {
+    selfChatId = getTeamGroupChatId();
+  } catch (error) {
+    console.error("Invalid TEAM_GROUP_CHAT_ID while checking self ticket stats", error);
+  }
+
+  // TEAM_GROUP_CHAT_ID may be unset; fall back to the chat the bot remembered.
+  if (selfChatId === undefined) {
+    try {
+      selfChatId = await getStoredTeamGroupChatId();
+    } catch (error) {
+      console.error("Could not read stored team group chat id while checking self ticket stats", error);
+    }
+  }
+
+  // Only the main group is answered. Other groups keep their current behavior,
+  // and outside the main group only the explicit command is recognized.
+  if (selfChatId !== undefined && message.chat.id !== selfChatId) {
+    if (!isCommand) return false;
+    await sendMessage(
+      message.chat.id,
+      "ℹ️ Ticket stats are only available in the main team group.",
+      { replyToMessageId: message.message_id }
+    );
+    return true;
+  }
+
+  const request = parseSelfTicketStatsRequest(text, registration.member_id);
+  if (!request) return false;
+
+  try {
+    if (request.otherMemberName) {
+      await sendMessage(
+        message.chat.id,
+        formatSelfOnlyNotice(request.otherMemberName, registration.member_name),
+        { replyToMessageId: message.message_id }
+      );
+      return true;
+    }
+
+    const stats = await buildMemberTicketStats(
+      db,
+      registration.member_id,
+      registration.member_name,
+      request.window
+    );
+
+    await sendMessage(message.chat.id, formatMemberTicketStatsReply(stats), {
+      replyToMessageId: message.message_id
+    });
+    return true;
+  } catch (error) {
+    console.error(
+      `Failed to answer self ticket stats for ${registration.member_id} in chat ${message.chat.id}:`,
+      error
+    );
+    return false;
+  }
+}
+
 async function handleBotChatMemberUpdate(db: SupabaseRestClient, update: TelegramChatMemberUpdated): Promise<void> {
   const status = update.new_chat_member.status;
   if (!isGroupChat(update.chat) || (status !== "member" && status !== "administrator")) return;
@@ -401,6 +490,8 @@ const RESERVED_SAVED_COMMAND_NAMES = new Set([
   "help",
   "id",
   "menu",
+  "mystats",
+  "mytickets",
   "personal",
   "save",
   "start"
