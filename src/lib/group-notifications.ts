@@ -253,13 +253,64 @@ export function getSupportIntroTargetChatIds(): number[] {
   return getStatsGroupChatIds();
 }
 
+function supportIntroActiveKey(chatId: number): string {
+  return `support_intro_active:${chatId}`;
+}
+
+async function deleteActiveSupportIntro(db: SupabaseRestClient, chatId: number): Promise<void> {
+  let raw: string | null = null;
+  try {
+    raw = await getAppSetting(db, supportIntroActiveKey(chatId));
+  } catch (error) {
+    console.warn(
+      `Could not read active support intro for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return;
+  }
+  if (!raw) return;
+
+  let messageId: number | undefined;
+  try {
+    const parsed = JSON.parse(raw) as { messageId?: unknown };
+    if (typeof parsed.messageId === "number" && Number.isSafeInteger(parsed.messageId)) {
+      messageId = parsed.messageId;
+    }
+  } catch {
+    // Legacy/plain value stored before JSON tracking; nothing to delete.
+    return;
+  }
+  if (messageId === undefined) return;
+
+  await deleteMessage(chatId, messageId);
+}
+
+async function rememberActiveSupportIntro(
+  db: SupabaseRestClient,
+  chatId: number,
+  messageId: number,
+  registration: Pick<Registration, "member_id">,
+  workDateUtc: string
+): Promise<void> {
+  try {
+    await upsertAppSetting(
+      db,
+      supportIntroActiveKey(chatId),
+      JSON.stringify({ messageId, memberId: registration.member_id, workDateUtc })
+    );
+  } catch (error) {
+    console.warn(
+      `Could not persist active support intro for chat ${chatId}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 export async function sendSupportIntroToGroups(
   db: SupabaseRestClient,
   registration: Pick<Registration, "telegram_user_id" | "telegram_username" | "member_id" | "member_name">,
   workDateUtc: string
 ): Promise<number> {
   const chatIds = getSupportIntroTargetChatIds();
-  let sent =  ​0;
+  let sent = 0;
   for (const chatId of chatIds) {
     const eventKey = `support_intro:${chatId}:${registration.member_id}:${workDateUtc}`;
     if (await hasCronEvent(db, eventKey)) continue;
@@ -270,14 +321,21 @@ export async function sendSupportIntroToGroups(
       `Your assistant today is ${mention} — ask anything about ` +
       "GoodDollar, face verification, swap, bridge,and more. We're here to help you! 🚀";
 
+    let posted: SentTelegramMessage;
     try {
-      await sendMessage(chatId, message, { parseMode: "HTML" });
+      posted = await sendMessage(chatId, message, { parseMode: "HTML" });
     } catch (error) {
       console.error(
         `Failed to send support intro to chat ${chatId} for ${registration.member_id}/${workDateUtc}: ${error instanceof Error ? error.message : String(error)}`
       );
       continue;
     }
+
+    // Remove the previous shift's "assistant today" intro so each group shows
+    // only the current on-duty assistant instead of a duplicate. Done after the
+    // new intro is posted so a send failure never leaves the group without one.
+    await deleteActiveSupportIntro(db, chatId);
+    await rememberActiveSupportIntro(db, chatId, posted.message_id, registration, workDateUtc);
 
     try {
       await recordCronEvent(db, eventKey, registration.member_id, workDateUtc, "support_intro");
@@ -286,7 +344,7 @@ export async function sendSupportIntroToGroups(
         `Failed to record support intro cron event ${eventKey}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-    sent +=  ​1;
+    sent += 1;
   }
   return sent;
 }
