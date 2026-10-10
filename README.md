@@ -124,10 +124,12 @@ The dashboard is intentionally read-only and has no authentication. Anything sen
 
 ## Cron routes
 
-Vercel cron runs:
+Vercel cron runs (via `vercel.json`, Hobby-compatible daily schedules only):
 
-- `/api/cron/timekeeping` every 5 minutes for reminders and late/missing-time-out alerts.
 - `/api/cron/daily-report` daily at 01:05 UTC to store a daily summary in activity logs.
+- `/api/cron/repeated-issue-report` daily at 01:15 UTC.
+
+The every-5-minutes timekeeping job cannot run as a Vercel cron on the Hobby plan (Hobby accounts are limited to daily cron jobs), so it is triggered by a GitHub Actions workflow (`.github/workflows/timekeeping-cron.yml`) that pings `/api/cron/timekeeping` every 5 minutes. See [Timekeeping cron schedule](#timekeeping-cron-schedule) for the required repository secrets.
 
 On Netlify, configure scheduled calls to the same URLs (`/api/cron/timekeeping` and `/api/cron/daily-report`) with your preferred scheduler, or migrate these wrappers to Netlify Scheduled Functions if you want Netlify to own the schedule.
 
@@ -148,7 +150,14 @@ After this is set, `/api/cron/timekeeping` can post group reminders 1 hour and 1
 
 ### Timekeeping cron schedule
 
-The reminders are only automatic when the host runs the timekeeping cron on a schedule. Vercel uses `vercel.json` to call `/api/cron/timekeeping` every 5 minutes. Netlify uses `netlify.toml` to run the `cron-timekeeping` scheduled function every 5 minutes; after deploy, confirm the function has a **Scheduled** badge in the Netlify Functions page. The daily report cron runs at 01:05 UTC in both hosts, and the repeated issue report cron runs at 01:15 UTC.
+The reminders are only automatic when the host runs the timekeeping cron on a schedule. Because Vercel Hobby accounts only allow daily cron jobs, the every-5-minutes timekeeping job is triggered by the GitHub Actions workflow in `.github/workflows/timekeeping-cron.yml` instead of `vercel.json`. Netlify uses `netlify.toml` to run the `cron-timekeeping` scheduled function every 5 minutes; after deploy, confirm the function has a **Scheduled** badge in the Netlify Functions page. The daily report cron runs at 01:05 UTC in both hosts, and the repeated issue report cron runs at 01:15 UTC.
+
+To enable the GitHub Actions timekeeping cron, add two repository secrets under **Settings → Secrets and variables → Actions**:
+
+- `CRON_BASE_URL` — the deployment base URL, for example `https://your-project.vercel.app`.
+- `CRON_SECRET` — the same value as the Vercel `CRON_SECRET` environment variable.
+
+The workflow runs every 5 minutes and can also be started manually from the **Actions** tab (`workflow_dispatch`). GitHub may delay scheduled runs during peak load, so treat the 5-minute cadence as best-effort.
 
 If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically, including the daily "assistant today" intros in the stats groups.
 
