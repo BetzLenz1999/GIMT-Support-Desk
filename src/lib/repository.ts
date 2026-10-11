@@ -1,4 +1,4 @@
-import { eq, gte, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TeamInboxDm, type TelegramGroup, type TimeLog } from "./supabase.js";
+import { eq, gte, inList, isNull, limit, lte, order, params, type ActivityLog, type AppSetting, type ConversationState, type GroupActionMessage, type GroupActionType, type GroupMessageStat, type PendingGroupWelcome, type ProofOfWorkReminder, type ProofOfWorkSubmission, type Registration, type SavedCommand, type ShiftRequest, type SupportTicket, type SupportTicketEvent, type SupportTicketMessage, type SupportTicketStatus, type SupabaseRestClient, type SupportTicketAttachment, type TeamInboxDm, type TelegramGroup, type TimeLog } from "./supabase.js";
 import type { TelegramUser } from "./telegram-types.js";
 import type { TeamMember } from "./team-schedule.js";
 
@@ -495,6 +495,83 @@ export async function upsertTelegramGroup(
   );
 
   return single(rows);
+}
+
+const WELCOME_GATE_MINUTES = 10;
+
+/**
+ * Remembers a non-bot joiner in a stats group so the welcome can be sent only
+ * after their captcha gate clears. The unique (chat, user) key lets re-joins
+ * refresh the row, and a join while a welcome is still pending extends the
+ * fallback window instead of overwriting the existing deadline.
+ */
+export async function upsertPendingGroupWelcome(
+  db: SupabaseRestClient,
+  input: {
+    telegram_chat_id: number;
+    telegram_user_id: number;
+    display_name: string;
+  }
+): Promise<PendingGroupWelcome> {
+  const now = new Date();
+  const existingRows = await db.select<PendingGroupWelcome>(
+    "pending_group_welcomes",
+    params(eq("telegram_chat_id", input.telegram_chat_id), eq("telegram_user_id", input.telegram_user_id), limit(1))
+  );
+  const existing = existingRows[0];
+
+  const preserveDeadline =
+    existing && !existing.welcome_sent_at && new Date(existing.expires_at).getTime() > now.getTime();
+  const expiresAt = preserveDeadline
+    ? existing.expires_at
+    : new Date(now.getTime() + WELCOME_GATE_MINUTES * 60_000).toISOString();
+
+  const rows = await db.upsert<PendingGroupWelcome>(
+    "pending_group_welcomes",
+    {
+      telegram_chat_id: input.telegram_chat_id,
+      telegram_user_id: input.telegram_user_id,
+      display_name: input.display_name,
+      joined_at: now.toISOString(),
+      expires_at: expiresAt,
+      welcome_sent_at: null
+    },
+    "telegram_chat_id,telegram_user_id"
+  );
+
+  return single(rows);
+}
+
+export async function findPendingGroupWelcome(
+  db: SupabaseRestClient,
+  chatId: number,
+  userId: number
+): Promise<PendingGroupWelcome | null> {
+  const rows = await db.select<PendingGroupWelcome>(
+    "pending_group_welcomes",
+    params(eq("telegram_chat_id", chatId), eq("telegram_user_id", userId), limit(1))
+  );
+  return rows[0] ?? null;
+}
+
+/** Pending welcomes whose fallback deadline has passed and that were never sent. */
+export async function listExpiredPendingGroupWelcomes(db: SupabaseRestClient, now: Date): Promise<PendingGroupWelcome[]> {
+  return db.select<PendingGroupWelcome>(
+    "pending_group_welcomes",
+    params(isNull("welcome_sent_at"), lte("expires_at", now.toISOString()))
+  );
+}
+
+export async function markPendingGroupWelcomeSent(db: SupabaseRestClient, id: string): Promise<void> {
+  await db.update<PendingGroupWelcome>(
+    "pending_group_welcomes",
+    { welcome_sent_at: new Date().toISOString() },
+    params(eq("id", id))
+  );
+}
+
+export async function deletePendingGroupWelcome(db: SupabaseRestClient, chatId: number, userId: number): Promise<void> {
+  await db.delete("pending_group_welcomes", params(eq("telegram_chat_id", chatId), eq("telegram_user_id", userId)));
 }
 
 export async function incrementGroupMessageCount(

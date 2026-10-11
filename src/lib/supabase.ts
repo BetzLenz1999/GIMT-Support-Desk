@@ -139,6 +139,18 @@ export type GroupMessageStatWithGroup = GroupMessageStat & {
   group_type: string | null;
 };
 
+/** A non-bot user who joined a stats group and is waiting for the captcha gate to clear. */
+export type PendingGroupWelcome = {
+  id: string;
+  telegram_chat_id: number;
+  telegram_user_id: number;
+  display_name: string;
+  joined_at: string;
+  expires_at: string;
+  welcome_sent_at: string | null;
+  created_at: string;
+};
+
 export type SavedCommand = {
   id: string;
   owner_telegram_user_id: number;
