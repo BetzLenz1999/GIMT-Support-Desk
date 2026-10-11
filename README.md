@@ -159,6 +159,14 @@ To enable the GitHub Actions timekeeping cron, add two repository secrets under 
 
 The workflow runs every 5 minutes and can also be started manually from the **Actions** tab (`workflow_dispatch`). GitHub may delay scheduled runs during peak load, so treat the 5-minute cadence as best-effort.
 
+**Recommended: use an external scheduler instead of (or in addition to) GitHub Actions.** GitHub disables scheduled workflows after 60 days of repository inactivity and, as happened here, a locked account or billing issue silently stops every run before a single step executes — which halts all reminders even though manual Time In/Out keeps working. A dedicated scheduler is independent of the GitHub account state, so the reminders keep firing. Point any free cron service (for example cron-job.org or UptimeRobot) at the endpoint every 5 minutes:
+
+```text
+GET https://<your-deployment>/api/cron/timekeeping?secret=<CRON_SECRET>
+```
+
+The endpoint accepts either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`. Keep the GitHub Actions workflow as a backup if you like; both call the same endpoint and reminders are deduplicated per member per work date via `cron_events`, so running both will not double-send. If the scheduler is configured, you can also add a plain `GET` monitor to `/api/cron/timekeeping` so a failure surfaces as a down alert instead of silent missed reminders.
+
 If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically, including the daily "assistant today" intros in the stats groups.
 
 The "assistant today" intro fires while a member's shift is active and targets only the chat IDs listed in `TEAM_STATS_GROUP_CHAT_IDS`. It never targets `TEAM_GROUP_CHAT_ID` unless that same ID is explicitly included in `TEAM_STATS_GROUP_CHAT_IDS`. It is sent at most once per member per group per UTC work date — tracked by `cron_events` — so each of the 5 daily shift starts posts exactly one intro per group. Before each new intro, the bot deletes the previous shift's intro in that group (its message ID is tracked in `app_settings` under `support_intro_active:{chatId}`), so the group always shows only the current on-duty assistant instead of a stack of duplicate intros.
