@@ -1,6 +1,7 @@
 import type { Registration, SupabaseRestClient } from "./supabase.js";
 import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
 import { sendSupportIntroToGroups, sendTeamGroupMessage, sweepExpiredGroupActionMessages } from "./group-notifications.js";
+import { sweepPendingGroupWelcomes } from "./bot.js";
 import { dashboardKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
 import { TEAM_SCHEDULE, getTeamMember } from "./team-schedule.js";
 import { sendMessage } from "./telegram.js";
@@ -40,7 +41,7 @@ function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): bool
   return minutesSinceTarget >= startMinutesAfter;
 }
 
-export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; supportIntroSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
+export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; supportIntroSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; welcomeFallbackSent: number; errors: number }> {
   let sent = 0;
   let groupSent =  ​0;
   let supportIntroSent =  0;
@@ -275,8 +276,16 @@ Current: ${formatUtc(now)} UTC`;
     );
   }
 
+  let welcomeFallbackSent = 0;
+  try {
+    welcomeFallbackSent = await sweepPendingGroupWelcomes(db, now);
+  } catch (error) {
+    errors += 1;
+    console.error(`Pending group welcome sweep failed: ${error instanceof Error ? error.message : String(error)}`, error);
+  }
 
-  return { sent, groupSent, supportIntroSent, encouragementSent, sweptExpired, inactiveClosedTickets, errors };
+
+  return { sent, groupSent, supportIntroSent, encouragementSent, sweptExpired, inactiveClosedTickets, welcomeFallbackSent, errors };
 }
 
 async function sendTeamEncouragementReminder(

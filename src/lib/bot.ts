@@ -34,7 +34,12 @@ import {
   upsertRegistration,
   upsertSavedCommand,
   upsertTeamInboxDm,
-  upsertTelegramGroup
+  upsertTelegramGroup,
+  upsertPendingGroupWelcome,
+  findPendingGroupWelcome,
+  listExpiredPendingGroupWelcomes,
+  markPendingGroupWelcomeSent,
+  deletePendingGroupWelcome
 } from "./repository.js";
 import {
   clearGroupActionMessages,
@@ -69,6 +74,11 @@ export async function handleTelegramUpdate(db: SupabaseRestClient, update: Teleg
 
     if (update.my_chat_member) {
       await handleBotChatMemberUpdate(db, update.my_chat_member);
+      return;
+    }
+
+    if (update.chat_member) {
+      await handleChatMemberUpdate(db, update.chat_member);
       return;
     }
 
@@ -107,15 +117,16 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   const text = message.text?.trim() ?? "";
   const command = getCommand(text);
 
-  if (message.new_chat_members?.some((member) => member.is_bot)) {
+  if (isGroupChat(message.chat) && message.new_chat_members?.length) {
+    // A bot joining (for example the captcha bot) is not a member to welcome,
+    // but humans may share the same service message, so keep processing it.
+    if (message.new_chat_members.some((member) => !member.is_bot)) {
+      await welcomeNewStatsGroupMembers(db, message);
+    }
     return;
   }
 
-  // Join events come through as service messages (no "from" user)that would
-  // otherwise flow into the regular message path. Send the welcome and stop
-  // there; joining should never open a support ticket or count as a chat message.
-  if (isGroupChat(message.chat) && message.new_chat_members?.length) {
-    await welcomeNewStatsGroupMembers(db, message);
+  if (message.new_chat_members?.some((member) => member.is_bot)) {
     return;
   }
 
@@ -186,7 +197,13 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   await sendMessage(message.chat.id, "Please use the buttons below.", { replyMarkup: dashboardKeyboard() });
 }
 
-/** Welcomes people only in the explicitly configured public support/stat groups. */
+/**
+ * Records non-bot joiners in the configured stats groups instead of welcoming
+ * them immediately. Captcha bots (Group Help / Shieldy) mute new members right
+ * after they join, so an immediate welcome is posted while the member is still
+ * muted. The welcome is released later, once the member is unmuted (see
+ * handleChatMemberUpdate) or after the fallback deadline (sweepPendingGroupWelcomes).
+ */
 async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: TelegramMessage): Promise<void> {
   let statsChatIds: number[];
   try {
@@ -204,12 +221,98 @@ async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: Tele
   const members = (message.new_chat_members ?? []).filter((member) => !member.is_bot);
   if (!members.length) return;
 
-  const names = members.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
-  await sendMessage(
-    message.chat.id,
-    `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`,
-    { parseMode: "HTML", replyToMessageId: message.message_id }
-  );
+  for (const member of members) {
+    try {
+      await upsertPendingGroupWelcome(db, {
+        telegram_chat_id: message.chat.id,
+        telegram_user_id: member.id,
+        display_name: getTelegramUserDisplayName(member)
+      });
+    } catch (error) {
+      console.error(
+        `Could not record pending welcome for user ${member.id} in chat ${message.chat.id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+}
+
+function buildWelcomeMessage(displayName: string): string {
+  const names = escapeHtmlForMention(displayName);
+  return `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`;
+}
+
+/** Sends the welcome for a pending joiner exactly once and marks the row sent. */
+async function sendPendingGroupWelcome(db: SupabaseRestClient, welcome: { id: string; telegram_chat_id: number; display_name: string }): Promise<boolean> {
+  await sendMessage(welcome.telegram_chat_id, buildWelcomeMessage(welcome.display_name), { parseMode: "HTML" });
+  await markPendingGroupWelcomeSent(db, welcome.id);
+  return true;
+}
+
+/**
+ * Releases the welcome when a pending joiner is unmuted, which is how the
+ * captcha gate clears. Restricted members stay muted; kicked/left members are
+ * dropped without a welcome.
+ */
+async function handleChatMemberUpdate(db: SupabaseRestClient, update: TelegramChatMemberUpdated): Promise<void> {
+  if (!isGroupChat(update.chat)) return;
+
+  const user = update.new_chat_member.user;
+  if (user.is_bot) return;
+
+  let statsChatIds: number[];
+  try {
+    statsChatIds = getStatsGroupChatIds();
+  } catch (error) {
+    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS while handling chat_member", error);
+    return;
+  }
+  if (!statsChatIds.includes(update.chat.id)) return;
+
+  const newStatus = update.new_chat_member.status;
+  if (newStatus === "left" || newStatus === "kicked") {
+    try {
+      await deletePendingGroupWelcome(db, update.chat.id, user.id);
+    } catch (error) {
+      console.warn(`Could not clear pending welcome for user ${user.id} in chat ${update.chat.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return;
+  }
+
+  // Unmuted = captcha passed. Telegram reports this as "member" (or "administrator").
+  const isUnmuted = newStatus === "member" || newStatus === "administrator";
+  if (!isUnmuted) return;
+
+  const pending = await findPendingGroupWelcome(db, update.chat.id, user.id);
+  if (!pending || pending.welcome_sent_at) return;
+
+  try {
+    await sendPendingGroupWelcome(db, pending);
+  } catch (error) {
+    console.error(`Failed to send welcome for user ${user.id} in chat ${update.chat.id}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Fallback for joiners that never produce a usable chat_member signal (captcha
+ * disabled, missed update, or the bot lacks chat_member access). Welcomes any
+ * pending row whose deadline has passed.
+ */
+export async function sweepPendingGroupWelcomes(db: SupabaseRestClient, now = new Date()): Promise<number> {
+  const expired = await listExpiredPendingGroupWelcomes(db, now);
+  let sent = 0;
+
+  for (const pending of expired) {
+    try {
+      await sendPendingGroupWelcome(db, pending);
+      sent += 1;
+    } catch (error) {
+      console.error(
+        `Fallback welcome failed for user ${pending.telegram_user_id} in chat ${pending.telegram_chat_id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  return sent;
 }
 
 const trackGroupMessageWarnings = {
