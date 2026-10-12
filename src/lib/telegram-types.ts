@@ -36,6 +36,7 @@ export type TelegramMessage = {
 export type TelegramChatMember = {
   user: TelegramUser;
   status: string;
+  is_member?: boolean;
 };
 
 export type TelegramChatMemberUpdated = {
