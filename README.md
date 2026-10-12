@@ -34,6 +34,8 @@ CRON_SECRET=
 TEAM_GROUP_CHAT_ID=
 # Optional public stats allowlist for multiple Telegram groups (comma- or space-separated)
 TEAM_STATS_GROUP_CHAT_IDS=
+# Optional GoodMarket group chat ID (gets a GoodMarket-specific welcome)
+GOODMARKET_CHAT_ID=
 # Optional support flow switch: old or ai
 SUPPORT_MODE=old
 ```
@@ -45,6 +47,8 @@ No Telegram personal chat ID environment variable is required. The bot saves eac
 `TEAM_GROUP_CHAT_ID` is optional. Set it to your primary Telegram group chat ID if you want the bot to also post team-wide 1-hour and 10-minute pre-shift, shift-start, late-alert, Time Out reminder, missing-Time-Out, and blocked-early-attendance warnings in that group. With this variable set, the primary group also receives a live broadcast each time someone uses the bot's private DM buttons for Time In, Time Out, Proof of Work submission, Excuse, Absent, or Shift Swap — so reminders are not the only messages the group sees.
 
 `TEAM_STATS_GROUP_CHAT_IDS` is optional and controls public message-stat tracking when the bot is present in multiple Telegram groups. Set it to comma- or space-separated chat IDs, for example `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`. When this env var is set, only those groups are counted in `group_message_stats` and shown on the dashboard. It also enables a public welcome message when a non-bot user joins one of those configured groups. When it is not set, the bot keeps the previous permissive behavior and counts registered-member messages from any group where the bot receives messages, but does not send automatic welcomes.
+
+`GOODMARKET_CHAT_ID` is optional and, when set, gives that single group a GoodMarket-specific welcome instead of the support-desk one. The GoodMarket match wins if the same chat ID also appears in `TEAM_STATS_GROUP_CHAT_IDS`. Get the value by sending `/chatid@YourBotUsername` in the GoodMarket group and copying the returned ID (it looks like `-1001234567890`).
 
 Changing `TEAM_GROUP_CHAT_ID` or adding IDs to `TEAM_STATS_GROUP_CHAT_IDS` does not reset Time In, Time Out, Activity History, or Proof of Work submissions. Those records stay member-based; only public message stats are separated by Telegram group chat ID.
 
