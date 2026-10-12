@@ -1,4 +1,4 @@
-import { requireEnv } from "./config.js";
+import { optionalEnv, requireEnv } from "./config.js";
 import { fetchWithRetry } from "./http.js";
 import type { InlineKeyboardMarkup } from "./telegram-types.js";
 
@@ -205,6 +205,68 @@ export type TelegramWebhookInfo = {
 
 export async function getWebhookInfo(): Promise<TelegramWebhookInfo> {
   return telegramApi<TelegramWebhookInfo>("getWebhookInfo", {});
+}
+
+export type SetWebhookOptions = {
+  url: string;
+  secretToken?: string;
+  allowedUpdates?: string[];
+};
+
+export async function setWebhook(options: SetWebhookOptions): Promise<boolean> {
+  return telegramApi<boolean>("setWebhook", {
+    url: options.url,
+    secret_token: options.secretToken,
+    allowed_updates: options.allowedUpdates
+  });
+}
+
+/** Update types this bot handles. Telegram excludes chat_member from the default set. */
+export const REQUIRED_WEBHOOK_UPDATES = ["message", "callback_query", "my_chat_member", "chat_member"];
+
+let webhookSubscriptionChecked = false;
+
+/**
+ * Re-registers the existing webhook with chat_member in allowed_updates when it
+ * is missing. Telegram omits chat_member from the default update set, so a bot
+ * whose webhook was registered without it never receives group joins and cannot
+ * welcome new members. Reuses the webhook's current URL, so it is a no-op until
+ * the subscription is actually incomplete. Runs at most once per warm instance.
+ */
+export async function ensureChatMemberSubscription(): Promise<void> {
+  if (webhookSubscriptionChecked) return;
+  webhookSubscriptionChecked = true;
+
+  let info: TelegramWebhookInfo;
+  try {
+    info = await getWebhookInfo();
+  } catch (error) {
+    webhookSubscriptionChecked = false;
+    console.warn("Could not read webhook info to verify chat_member subscription:", error);
+    return;
+  }
+
+  if (!info.url) return;
+  if (Array.isArray(info.allowed_updates) && info.allowed_updates.includes("chat_member")) return;
+
+  // Keep any extra update types the deployment already subscribed to; only add
+  // the ones this bot needs. The bot handles message, callback_query,
+  // my_chat_member and chat_member, so this list is complete for it.
+  const allowedUpdates = Array.from(new Set([...(info.allowed_updates ?? []), ...REQUIRED_WEBHOOK_UPDATES]));
+
+  try {
+    await setWebhook({
+      url: info.url,
+      secretToken: optionalEnv("TELEGRAM_WEBHOOK_SECRET"),
+      allowedUpdates
+    });
+    console.warn(
+      `Re-registered webhook ${info.url} with allowed_updates=${allowedUpdates.join(",")} so group joins (chat_member) are delivered. Previous allowed_updates: ${JSON.stringify(info.allowed_updates ?? "default")}.`
+    );
+  } catch (error) {
+    webhookSubscriptionChecked = false;
+    console.error("Failed to re-register webhook with chat_member subscription:", error);
+  }
 }
 
 export type TelegramBotInfo = {

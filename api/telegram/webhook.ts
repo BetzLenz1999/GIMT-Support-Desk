@@ -1,8 +1,31 @@
 import { optionalEnv } from "../../src/lib/config.js";
 import { handleTelegramUpdate } from "../../src/lib/bot.js";
+import { getStatsGroupChatIds } from "../../src/lib/group-notifications.js";
 import { getSupabase } from "../../src/lib/supabase.js";
-import { getMe, getWebhookInfo } from "../../src/lib/telegram.js";
+import { ensureChatMemberSubscription, getChatMember, getMe, getWebhookInfo } from "../../src/lib/telegram.js";
 import type { TelegramUpdate } from "../../src/lib/telegram-types.js";
+
+/** Reports whether the bot is an administrator in each configured stats group. */
+async function describeStatsGroupAccess(botId: number): Promise<Array<Record<string, unknown>>> {
+  let chatIds: number[];
+  try {
+    chatIds = getStatsGroupChatIds();
+  } catch (error) {
+    return [{ error: error instanceof Error ? error.message : String(error) }];
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const chatId of chatIds) {
+    const member = await getChatMember(chatId, botId);
+    results.push({
+      chat_id: chatId,
+      bot_status: member?.status ?? "unknown",
+      // chat_member updates require the bot to be an administrator.
+      receives_join_updates: member?.status === "administrator" || member?.status === "creator"
+    });
+  }
+  return results;
+}
 
 async function readJsonBody<T>(request: any): Promise<T> {
   const chunks: Uint8Array[] = [];
@@ -108,6 +131,9 @@ async function handleDiagnostics(request: any, response: any) {
 
   if (optionalEnv("TELEGRAM_BOT_TOKEN")) {
     try {
+      // Opening this diagnostics URL also repairs a webhook that is missing the
+      // chat_member subscription, so group welcomes work without a redeploy.
+      await ensureChatMemberSubscription();
       const [bot, webhook] = await Promise.all([getMe(), getWebhookInfo()]);
       diagnostics.telegram = {
         bot: {
@@ -120,8 +146,12 @@ async function handleDiagnostics(request: any, response: any) {
           pending_update_count: webhook.pending_update_count,
           last_error_date: webhook.last_error_date,
           last_error_message: webhook.last_error_message,
-          allowed_updates: webhook.allowed_updates
-        }
+          allowed_updates: webhook.allowed_updates,
+          chat_member_subscribed: Array.isArray(webhook.allowed_updates)
+            ? webhook.allowed_updates.includes("chat_member")
+            : false
+        },
+        stats_groups: await describeStatsGroupAccess(bot.id)
       };
     } catch (error) {
       diagnostics.telegram = {
@@ -152,6 +182,11 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
+    // Self-heal the webhook subscription: Telegram omits chat_member from the
+    // default update set, so without this a bot registered by the older
+    // setWebhook command never receives group joins.
+    await ensureChatMemberSubscription();
+
     const update = await readJsonBody<TelegramUpdate>(request);
     await handleTelegramUpdate(getSupabase(), update);
     sendJson(response, 200, { ok: true });

@@ -218,14 +218,23 @@ async function handleChatMemberUpdate(db: SupabaseRestClient, update: TelegramCh
   const user = update.new_chat_member.user;
   if (user.is_bot) return;
 
-  // Only a transition from left/banned to member is a join; promotions and
-  // leaves must not produce a welcome.
-  const previous = update.old_chat_member.status;
-  const isJoin = update.new_chat_member.status === "member" && (previous === "left" || previous === "kicked");
-  if (!isJoin) return;
+  // A join is a transition from outside the chat (left/banned, or a restricted
+  // member who is not in the chat) to being present. Captcha bots mute newcomers
+  // right after they join, so the first update for a join is often
+  // restricted/is_member, not member; requiring only "member" misses it.
+  const wasOutside = update.old_chat_member.status === "left" || update.old_chat_member.status === "kicked";
+  const isPresent =
+    update.new_chat_member.status === "member" ||
+    update.new_chat_member.status === "administrator" ||
+    update.new_chat_member.status === "creator" ||
+    (update.new_chat_member.status === "restricted" && update.new_chat_member.is_member === true);
+  if (!wasOutside || !isPresent) return;
 
   if (!(await isWelcomeEnabledGroup(db, update.chat))) return;
 
+  console.info(
+    `Group join detected for user ${user.id} in chat ${update.chat.id} (${update.old_chat_member.status} -> ${update.new_chat_member.status}). Sending welcome.`
+  );
   await sendGroupWelcome(db, update.chat, [user]);
 }
 

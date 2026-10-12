@@ -68,7 +68,9 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET","allowed_updates":["message","callback_query","my_chat_member","chat_member"]}'
 ```
 
-Include `chat_member` in `allowed_updates`. The bot welcomes new group members from the `chat_member` join event, which is the reliable join signal; the `new_chat_members` service message that arrives under `message` is a fallback because admin/captcha bots (Group Help, Shieldy) often delete it before Telegram delivers it. The bot must be an administrator in the group to receive `chat_member`. If the welcome stops arriving, re-run the `setWebhook` call above (Telegram only sends update types that the webhook was registered with) and confirm `chat_member` appears in `telegram.webhook.allowed_updates` on the diagnostics endpoint.
+Include `chat_member` in `allowed_updates`. The bot welcomes new group members from the `chat_member` join event, which is the reliable join signal; the `new_chat_members` service message that arrives under `message` is a fallback because admin/captcha bots (Group Help, Shieldy) often delete it before Telegram delivers it. The bot must be an administrator in the group to receive `chat_member`.
+
+You do not have to run `setWebhook` by hand to fix this: on the next incoming update (or when the diagnostics URL below is opened) the bot checks its webhook and, if `chat_member` is missing from `allowed_updates`, re-registers the existing webhook URL with it added. The diagnostics endpoint reports `telegram.webhook.chat_member_subscribed` and, per configured group, `telegram.stats_groups[].bot_status` with `receives_join_updates`, so you can confirm both the subscription and that the bot is an admin where members join.
 
 If Telegram says `Webhook is already set` but the bot still does not reply, first open the deployed webhook endpoint in a browser:
 
