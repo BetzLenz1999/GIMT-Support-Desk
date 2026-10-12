@@ -58,6 +58,7 @@ export type TelegramUpdate = {
   message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
   my_chat_member?: TelegramChatMemberUpdated;
+  chat_member?: TelegramChatMemberUpdated;
 };
 
 export type InlineKeyboardButton = {

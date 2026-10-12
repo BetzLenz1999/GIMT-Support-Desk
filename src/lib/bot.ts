@@ -28,7 +28,9 @@ import {
   recordGroupActionMessage,
   recordSupportTicketEvent,
   recordSupportTicketMessage,
+  releaseCronEvent,
   setConversationState,
+  tryRecordCronEvent,
   updateSupportTicket,
   updateTimeLog,
   upsertRegistration,
@@ -69,6 +71,13 @@ export async function handleTelegramUpdate(db: SupabaseRestClient, update: Teleg
 
     if (update.my_chat_member) {
       await handleBotChatMemberUpdate(db, update.my_chat_member);
+      return;
+    }
+
+    // Human joins are reported here when the webhook subscribes to chat_member.
+    // Service-message joins (new_chat_members) still arrive under update.message.
+    if (update.chat_member) {
+      await handleChatMemberUpdate(db, update.chat_member);
       return;
     }
 
@@ -188,28 +197,104 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
 
 /** Welcomes people only in the explicitly configured public support/stat groups. */
 async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: TelegramMessage): Promise<void> {
+  // An empty list means stats are permissive for backwards compatibility, but
+  // group welcomes are opt-in to avoid posting unexpectedly in every group.
+  if (!(await isWelcomeEnabledGroup(db, message.chat))) return;
+
+  const members = (message.new_chat_members ?? []).filter((member) => !member.is_bot);
+  if (!members.length) return;
+
+  await sendGroupWelcome(db, message.chat, members, { replyToMessageId: message.message_id });
+}
+
+/**
+ * Releases the welcome for a join reported through the chat_member update. This
+ * is the reliable join signal when the webhook is subscribed to chat_member;
+ * service-message joins (new_chat_members) are handled by welcomeNewStatsGroupMembers.
+ */
+async function handleChatMemberUpdate(db: SupabaseRestClient, update: TelegramChatMemberUpdated): Promise<void> {
+  if (!isGroupChat(update.chat)) return;
+
+  const user = update.new_chat_member.user;
+  if (user.is_bot) return;
+
+  // Only a transition from left/banned to member is a join; promotions and
+  // leaves must not produce a welcome.
+  const previous = update.old_chat_member.status;
+  const isJoin = update.new_chat_member.status === "member" && (previous === "left" || previous === "kicked");
+  if (!isJoin) return;
+
+  if (!(await isWelcomeEnabledGroup(db, update.chat))) return;
+
+  await sendGroupWelcome(db, update.chat, [user]);
+}
+
+/** True when the chat is a configured stats/support group that welcomes joiners. */
+async function isWelcomeEnabledGroup(db: SupabaseRestClient, chat: TelegramChat): Promise<boolean> {
   let statsChatIds: number[];
   try {
     statsChatIds = getStatsGroupChatIds();
   } catch (error) {
     console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS while handling group welcome", error);
-    return;
+    return false;
   }
 
-  // An empty list means stats are permissive for backwards compatibility, but
-  // group welcomes are opt-in to avoid posting unexpectedly in every group.
-  if (!statsChatIds.includes(message.chat.id)) return;
+  if (!statsChatIds.includes(chat.id)) return false;
 
-  await rememberTelegramGroup(db, message.chat);
-  const members = (message.new_chat_members ?? []).filter((member) => !member.is_bot);
-  if (!members.length) return;
+  await rememberTelegramGroup(db, chat);
+  return true;
+}
 
-  const names = members.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
-  await sendMessage(
-    message.chat.id,
-    `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`,
-    { parseMode: "HTML", replyToMessageId: message.message_id }
-  );
+/**
+ * Sends the welcome at most once per group per user per UTC day. Both join
+ * signals (chat_member and new_chat_members) can fire for the same join, and
+ * Telegram retries failed webhook deliveries, so the cron_events key dedupes.
+ */
+async function sendGroupWelcome(
+  db: SupabaseRestClient,
+  chat: TelegramChat,
+  members: TelegramUser[],
+  options: { replyToMessageId?: number } = {}
+): Promise<void> {
+  const unique = [...new Map(members.map((member) => [member.id, member])).values()];
+  if (!unique.length) return;
+
+  // Claim each joiner independently so a batched new_chat_members event and the
+  // per-user chat_member events for the same join cannot both post a welcome.
+  const today = utcDateKey(new Date());
+  const fresh: TelegramUser[] = [];
+  const claimedKeys: string[] = [];
+  for (const member of unique) {
+    const eventKey = `group_welcome:${chat.id}:${member.id}`;
+    let claimed: boolean;
+    try {
+      claimed = await tryRecordCronEvent(db, eventKey, "system", today, "group_welcome");
+    } catch (error) {
+      // If the dedupe store is unavailable, still welcome the member rather than
+      // silently dropping the message; a duplicate is better than none.
+      console.warn(`Could not record group welcome dedupe key ${eventKey}:`, error);
+      claimed = true;
+    }
+    if (claimed) {
+      fresh.push(member);
+      claimedKeys.push(eventKey);
+    }
+  }
+  if (!fresh.length) return;
+
+  const names = fresh.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
+  try {
+    await sendMessage(
+      chat.id,
+      `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`,
+      { parseMode: "HTML", replyToMessageId: options.replyToMessageId }
+    );
+  } catch (error) {
+    // Give the claim back so a later delivery of the join event can still welcome
+    // the member instead of the key blocking it for the rest of the day.
+    await Promise.allSettled(claimedKeys.map((key) => releaseCronEvent(db, key)));
+    console.error(`Failed to send group welcome in chat ${chat.id}:`, error);
+  }
 }
 
 const trackGroupMessageWarnings = {
