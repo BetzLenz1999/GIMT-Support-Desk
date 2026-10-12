@@ -1391,12 +1391,6 @@ async function isUserChatAdmin(chatId: number, userId: number): Promise<boolean>
   return chatMember.status === "creator" || chatMember.status === "administrator";
 }
 
-function truncateErrorMessage(error: unknown, maxLength = 300): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  if (raw.length <= maxLength) return raw;
-  return `${raw.slice(0, maxLength - 1)}…`;
-}
-
 async function runSaveCommandSafely(
   db: SupabaseRestClient,
   message: TelegramMessage,
@@ -1412,7 +1406,7 @@ async function runSaveCommandSafely(
     try {
       await sendMessage(
         message.chat.id,
-        `I couldn't save that. Diagnostic: ${truncateErrorMessage(error)}`,
+        "I couldn't save that just now. Please try again in a moment, or reply /save <name> to a post you sent.",
         { replyToMessageId: message.message_id }
       );
     } catch (sendError) {
