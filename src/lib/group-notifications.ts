@@ -13,7 +13,6 @@ import { TelegramApiError, deleteMessage, sendMessage, type SendMessageOptions, 
 
 const TEAM_GROUP_CHAT_ID_ENV = "TEAM_GROUP_CHAT_ID";
 const TEAM_STATS_GROUP_CHAT_IDS_ENV = "TEAM_STATS_GROUP_CHAT_IDS";
-const GOODMARKET_CHAT_ID_ENV = "GOODMARKET_CHAT_ID";
 const TEAM_GROUP_CHAT_ID_DB_KEY = "team_group_chat_id";
 
 let missingChatIdWarned = false;
@@ -65,23 +64,6 @@ export function getStatsGroupChatIds(): number[] {
   const raw = optionalEnv(TEAM_STATS_GROUP_CHAT_IDS_ENV);
   if (!raw) return [];
   return parseChatIdList(raw, TEAM_STATS_GROUP_CHAT_IDS_ENV);
-}
-
-export function getGoodMarketChatId(): number | undefined {
-  const raw = optionalEnv(GOODMARKET_CHAT_ID_ENV);
-  if (!raw) return undefined;
-
-  const cleaned = raw.trim().replace(/^["']|["']$/g, "");
-  if (!cleaned) return undefined;
-
-  const chatId = Number(cleaned);
-  if (!Number.isSafeInteger(chatId)) {
-    throw new Error(
-      `${GOODMARKET_CHAT_ID_ENV} must be a valid Telegram chat ID integer (got ${JSON.stringify(raw)}). Send "/chatid@YourBotUsername" in the GoodMarket group and copy the value (it should look like -1001234567890).`
-    );
-  }
-
-  return chatId;
 }
 
 export function isStatsGroupEnabled(chatId: number): boolean {

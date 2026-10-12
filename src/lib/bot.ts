@@ -38,7 +38,6 @@ import {
 } from "./repository.js";
 import {
   clearGroupActionMessages,
-  getGoodMarketChatId,
   getStatsGroupChatIds,
   getStoredTeamGroupChatId,
   getTeamGroupChatId,
@@ -187,27 +186,19 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
   await sendMessage(message.chat.id, "Please use the buttons below.", { replyMarkup: dashboardKeyboard() });
 }
 
-/**
- * Welcomes non-bot joiners in the configured groups. The GoodMarket group
- * (GOODMARKET_CHAT_ID) gets a GoodMarket-specific message; groups listed in
- * TEAM_STATS_GROUP_CHAT_IDS get the support-desk message. The GoodMarket match
- * wins when an ID appears in both.
- */
+/** Welcomes people only in the explicitly configured public support/stat groups. */
 async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: TelegramMessage): Promise<void> {
   let statsChatIds: number[];
-  let goodMarketChatId: number | undefined;
   try {
     statsChatIds = getStatsGroupChatIds();
-    goodMarketChatId = getGoodMarketChatId();
   } catch (error) {
-    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS or GOODMARKET_CHAT_ID while handling group welcome", error);
+    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS while handling group welcome", error);
     return;
   }
 
-  const isGoodMarket = goodMarketChatId !== undefined && message.chat.id === goodMarketChatId;
-  // An empty stats list means stats are permissive for backwards compatibility,
-  // but group welcomes are opt-in to avoid posting unexpectedly in every group.
-  if (!isGoodMarket && !statsChatIds.includes(message.chat.id)) return;
+  // An empty list means stats are permissive for backwards compatibility, but
+  // group welcomes are opt-in to avoid posting unexpectedly in every group.
+  if (!statsChatIds.includes(message.chat.id)) return;
 
   await rememberTelegramGroup(db, message.chat);
   const members = (message.new_chat_members ?? []).filter((member) => !member.is_bot);
@@ -216,17 +207,9 @@ async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: Tele
   const names = members.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
   await sendMessage(
     message.chat.id,
-    isGoodMarket ? buildGoodMarketWelcomeMessage(names) : buildSupportDeskWelcomeMessage(names),
+    `👋 Hey ${names}, welcome to GoodDollar Support Desk! We're glad to have you here. 🚀\n\nOn this group, we focus on ticketing to assist you. If you have a concern, question, or issue, just send us a message here and our support team will take care of it.\n\n✨ Start claiming: https://goodwallet.xyz\n💬 Telegram Community: https://t.me/GoodDollarX\n🛠️ Support Team: https://t.me/+2pQlOfCBG11iYzFk`,
     { parseMode: "HTML", replyToMessageId: message.message_id }
   );
-}
-
-function buildSupportDeskWelcomeMessage(names: string): string {
-  return `👋 Hey ${names}, welcome to GoodDollar Support Desk! We're glad to have you here. 🚀\n\nOn this group, we focus on ticketing to assist you. If you have a concern, question, or issue, just send us a message here and our support team will take care of it.\n\n✨ Start claiming: https://goodwallet.xyz\n💬 Telegram Community: https://t.me/GoodDollarX\n🛠️ Support Team: https://t.me/+2pQlOfCBG11iYzFk`;
-}
-
-function buildGoodMarketWelcomeMessage(names: string): string {
-  return `👋 Hey ${names}, welcome to GoodMarket! We're glad to have you on board. 🚀\n\nThis channel is where we explore everything GoodMarket has to offer — play & earn, learn & earn, UBI claiming, daily tasks, farming, lottery, and more. Jump in, have fun, and grow your G$!\n\n✨ Start claiming: Sign up at https://goodwallet.xyz and get your G$\n💬 Join the conversation: https://t.me/GoodDollarX\n🛠️ Found a bug or product issue? Reach out to our support team at https://t.me/+2pQlOfCBG11iYzFk`;
 }
 
 const trackGroupMessageWarnings = {
