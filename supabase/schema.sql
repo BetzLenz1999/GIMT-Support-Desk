@@ -380,22 +380,3 @@ create index if not exists team_inbox_dms_member_idx on public.team_inbox_dms(te
 -- rather than whichever customer message happened to arrive most recently.
 alter table if exists public.team_inbox_dms
   add column if not exists source_telegram_message_id bigint;
-
--- Captcha-gated welcome tracking for stats groups. A non-bot joiner is stored
--- here on join; the welcome is sent once the member is unmuted (captcha passed)
--- or, as a fallback, when expires_at passes.
-create table if not exists public.pending_group_welcomes (
-  id uuid primary key default gen_random_uuid(),
-  telegram_chat_id bigint not null,
-  telegram_user_id bigint not null,
-  display_name text not null,
-  joined_at timestamptz not null default now(),
-  expires_at timestamptz not null,
-  welcome_sent_at timestamptz,
-  created_at timestamptz not null default now(),
-  unique (telegram_chat_id, telegram_user_id)
-);
-
-create index if not exists pending_group_welcomes_pending_idx
-  on public.pending_group_welcomes(expires_at)
-  where welcome_sent_at is null;

@@ -44,9 +44,7 @@ No Telegram personal chat ID environment variable is required. The bot saves eac
 
 `TEAM_GROUP_CHAT_ID` is optional. Set it to your primary Telegram group chat ID if you want the bot to also post team-wide 1-hour and 10-minute pre-shift, shift-start, late-alert, Time Out reminder, missing-Time-Out, and blocked-early-attendance warnings in that group. With this variable set, the primary group also receives a live broadcast each time someone uses the bot's private DM buttons for Time In, Time Out, Proof of Work submission, Excuse, Absent, or Shift Swap — so reminders are not the only messages the group sees.
 
-`TEAM_STATS_GROUP_CHAT_IDS` is optional and controls public message-stat tracking when the bot is present in multiple Telegram groups. Set it to comma- or space-separated chat IDs, for example `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`. When this env var is set, only those groups are counted in `group_message_stats` and shown on the dashboard. It also enables a captcha-gated welcome message when a non-bot user joins one of those configured groups. When it is not set, the bot keeps the previous permissive behavior and counts registered-member messages from any group where the bot receives messages, but does not send automatic welcomes.
-
-The welcome is **captcha-aware**. When a user joins, the bot records them in `pending_group_welcomes` and waits; it does not post the welcome while the user is still muted by a captcha bot (Group Help, Shieldy, etc.). The welcome is released when the user is unmuted — Telegram reports the captcha clearing as a `chat_member` update moving the member from `restricted` (muted) to `member` (unmuted). If a user is kicked or leaves before passing the captcha, the pending welcome is dropped. As a fallback for cases where no `chat_member` signal arrives (captcha disabled, a missed update, or the bot is not an admin), the timekeeping cron sends any pending welcome whose 10-minute deadline has passed. This requires the bot to be an administrator in the group and `chat_member` to be listed in the webhook `allowed_updates` (see [Telegram setup](#telegram-setup)).
+`TEAM_STATS_GROUP_CHAT_IDS` is optional and controls public message-stat tracking when the bot is present in multiple Telegram groups. Set it to comma- or space-separated chat IDs, for example `TEAM_STATS_GROUP_CHAT_IDS=-1001111111111,-1002222222222`. When this env var is set, only those groups are counted in `group_message_stats` and shown on the dashboard. It also enables a public welcome message when a non-bot user joins one of those configured groups. When it is not set, the bot keeps the previous permissive behavior and counts registered-member messages from any group where the bot receives messages, but does not send automatic welcomes.
 
 Changing `TEAM_GROUP_CHAT_ID` or adding IDs to `TEAM_STATS_GROUP_CHAT_IDS` does not reset Time In, Time Out, Activity History, or Proof of Work submissions. Those records stay member-based; only public message stats are separated by Telegram group chat ID.
 
@@ -62,15 +60,13 @@ Re-run `supabase/schema.sql` after deploying the support-ticket workflow as well
 
 ## Telegram setup
 
-After deployment, set the Telegram webhook. Include `chat_member` in `allowed_updates` so the bot receives member status changes (needed for the captcha-gated welcome) — it is excluded by default:
+After deployment, set the Telegram webhook:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET","allowed_updates":["message","callback_query","my_chat_member","chat_member"]}'
+  -d '{"url":"https://YOUR-VERCEL-DOMAIN.vercel.app/api/telegram/webhook","secret_token":"YOUR_TELEGRAM_WEBHOOK_SECRET"}'
 ```
-
-The bot must be an **administrator** in a group to receive that group's `chat_member` updates.
 
 If Telegram says `Webhook is already set` but the bot still does not reply, first open the deployed webhook endpoint in a browser:
 

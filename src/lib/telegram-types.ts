@@ -36,9 +36,6 @@ export type TelegramMessage = {
 export type TelegramChatMember = {
   user: TelegramUser;
   status: string;
-  is_member?: boolean;
-  can_send_messages?: boolean;
-  until_date?: number;
 };
 
 export type TelegramChatMemberUpdated = {
@@ -61,7 +58,6 @@ export type TelegramUpdate = {
   message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
   my_chat_member?: TelegramChatMemberUpdated;
-  chat_member?: TelegramChatMemberUpdated;
 };
 
 export type InlineKeyboardButton = {
