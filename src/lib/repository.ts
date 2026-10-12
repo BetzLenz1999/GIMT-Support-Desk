@@ -283,6 +283,28 @@ export async function recordCronEvent(
   });
 }
 
+/** Claims a unique cron event. Returns false when the key was already recorded. */
+export async function tryRecordCronEvent(
+  db: SupabaseRestClient,
+  eventKey: string,
+  memberId: string,
+  workDateUtc: string,
+  eventType: string
+): Promise<boolean> {
+  try {
+    await recordCronEvent(db, eventKey, memberId, workDateUtc, eventType);
+    return true;
+  } catch (error) {
+    if (/23505|duplicate key/i.test(error instanceof Error ? error.message : String(error))) return false;
+    throw error;
+  }
+}
+
+/** Releases a previously claimed cron event so the work can be retried. */
+export async function releaseCronEvent(db: SupabaseRestClient, eventKey: string): Promise<void> {
+  await db.delete("cron_events", params(eq("event_key", eventKey)));
+}
+
 
 export async function upsertProofOfWorkReminder(
   db: SupabaseRestClient,
