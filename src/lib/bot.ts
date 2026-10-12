@@ -194,20 +194,14 @@ async function handleMessage(db: SupabaseRestClient, message: TelegramMessage): 
  * wins when an ID appears in both.
  */
 async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: TelegramMessage): Promise<void> {
-  // Parse each env independently so a bad value in one never suppresses the
-  // welcome in the other configured group.
-  let statsChatIds: number[] = [];
-  try {
-    statsChatIds = getStatsGroupChatIds();
-  } catch (error) {
-    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS while handling group welcome", error);
-  }
-
+  let statsChatIds: number[];
   let goodMarketChatId: number | undefined;
   try {
+    statsChatIds = getStatsGroupChatIds();
     goodMarketChatId = getGoodMarketChatId();
   } catch (error) {
-    console.error("Invalid GOODMARKET_CHAT_ID while handling group welcome", error);
+    console.error("Invalid TEAM_STATS_GROUP_CHAT_IDS or GOODMARKET_CHAT_ID while handling group welcome", error);
+    return;
   }
 
   const isGoodMarket = goodMarketChatId !== undefined && message.chat.id === goodMarketChatId;
