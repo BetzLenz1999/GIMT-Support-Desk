@@ -67,19 +67,6 @@ export function getStatsGroupChatIds(): number[] {
   return parseChatIdList(raw, TEAM_STATS_GROUP_CHAT_IDS_ENV);
 }
 
-/**
- * Accepts a plain integer, or a value that merely contains one (a pasted
- * t.me URL, an ID with stray whitespace, etc.). Returns undefined when no
- * usable integer is present.
- */
-function parseLooseChatId(value: string): number | undefined {
-  const trimmed = value.trim();
-  const candidate = /^-?\d+$/.test(trimmed) ? trimmed : trimmed.match(/-?\d{5,}/)?.[0];
-  if (!candidate) return undefined;
-  const chatId = Number(candidate);
-  return Number.isSafeInteger(chatId) ? chatId : undefined;
-}
-
 export function getGoodMarketChatId(): number | undefined {
   const raw = optionalEnv(GOODMARKET_CHAT_ID_ENV);
   if (!raw) return undefined;
@@ -87,14 +74,11 @@ export function getGoodMarketChatId(): number | undefined {
   const cleaned = raw.trim().replace(/^["']|["']$/g, "");
   if (!cleaned) return undefined;
 
-  const chatId = parseLooseChatId(cleaned);
-  if (chatId === undefined) {
-    // Never throw here: a bad value must not disable welcomes in the other
-    // configured groups. Log and treat GoodMarket as unconfigured.
-    console.warn(
-      `${GOODMARKET_CHAT_ID_ENV} is not a valid Telegram chat ID (got ${JSON.stringify(raw)}); the GoodMarket welcome is disabled. Send "/chatid@YourBotUsername" in the GoodMarket group and copy the numeric ID (for example -1001234567890).`
+  const chatId = Number(cleaned);
+  if (!Number.isSafeInteger(chatId)) {
+    throw new Error(
+      `${GOODMARKET_CHAT_ID_ENV} must be a valid Telegram chat ID integer (got ${JSON.stringify(raw)}). Send "/chatid@YourBotUsername" in the GoodMarket group and copy the value (it should look like -1001234567890).`
     );
-    return undefined;
   }
 
   return chatId;
