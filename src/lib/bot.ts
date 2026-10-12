@@ -448,6 +448,9 @@ async function handleBotChatMemberUpdate(db: SupabaseRestClient, update: Telegra
   const status = update.new_chat_member.status;
   if (!isGroupChat(update.chat) || (status !== "member" && status !== "administrator")) return;
 
+  const previousStatus = update.old_chat_member.status;
+  const wasAlreadyInGroup = previousStatus === "member" || previousStatus === "administrator";
+
   await rememberTelegramGroup(db, update.chat);
 
   let envChatId: number | undefined;
@@ -462,6 +465,9 @@ async function handleBotChatMemberUpdate(db: SupabaseRestClient, update: Telegra
     await rememberTeamGroupChatId(db, update.chat.id, { force: true });
   }
 
+  if (!wasAlreadyInGroup) {
+    await sendMessage(update.chat.id, buildGroupSetupText(update.chat));
+  }
 }
 
 async function rememberTelegramGroup(db: SupabaseRestClient, chat: TelegramChat): Promise<void> {
@@ -546,6 +552,10 @@ function isGroupChat(chat: TelegramChat): boolean {
 
 function buildChatIdText(chat: TelegramChat): string {
   return `Chat ID: ${chat.id}\nChat type: ${chat.type}${chat.title ? `\nTitle: ${chat.title}` : ""}`;
+}
+
+function buildGroupSetupText(chat: TelegramChat): string {
+  return `${buildChatIdText(chat)}\n\nUse this ID in TEAM_GROUP_CHAT_ID only for the one primary notification group. Add it to TEAM_STATS_GROUP_CHAT_IDS if this group should only be included in dashboard message stats.`;
 }
 
 function escapeHtmlForMention(text: string): string {
