@@ -207,7 +207,7 @@ async function welcomeNewStatsGroupMembers(db: SupabaseRestClient, message: Tele
   const names = members.map((member) => escapeHtmlForMention(getTelegramUserDisplayName(member))).join(", ");
   await sendMessage(
     message.chat.id,
-    `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`,
+    `👋 Hey ${names}, welcome to GoodDollar Support Desk! We're glad to have you here. 🚀\n\nOn this group, we focus on ticketing to assist you. If you have a concern, question, or issue, just send us a message here and our support team will take care of it.\n\n✨ Start claiming: https://goodwallet.xyz\n💬 Telegram Community: https://t.me/GoodDollarX\n🛠️ Support Team: https://t.me/+2pQlOfCBG11iYzFk`,
     { parseMode: "HTML", replyToMessageId: message.message_id }
   );
 }
