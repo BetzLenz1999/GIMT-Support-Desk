@@ -2844,6 +2844,25 @@ Available from: ${formatUtc(window.start)} UTC`, { parseMode: "HTML" });
     return;
   }
 
+  // Time In is only valid while the shift is running. Without this upper bound a
+  // member could still Time In during the post-shift buffer after their shift
+  // ended, recording a late attendance for a shift that is already over.
+  if (!isBeforeScheduledTime(window.end, now)) {
+    await editMessageText(
+      chatId,
+      messageId,
+      `⚠️ Time In is closed.\n\n👤 ${registration.member_name}${swapLine}\nScheduled shift: ${formatUtc(window.start)}–${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}\n\nYour shift already ended at ${formatUtc(window.end)} UTC, so Time In is no longer available.`,
+      { replyMarkup: dashboardKeyboard() }
+    );
+    const mention = `<a href="tg://user?id=${registration.telegram_user_id}">${escapeHtmlForMention(registration.member_name)}</a>`;
+    await sendTeamGroupMessage(`⚠️ Late Time In Blocked
+
+${mention} tried to Time In after the shift ended.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}
+Scheduled shift: ${formatUtc(window.start)}–${formatUtc(window.end)} UTC
+Shift ended: ${formatUtc(window.end)} UTC`, { parseMode: "HTML" });
+    return;
+  }
+
   const log = existing ?? await getOrCreateTimeLog(db, registration, window.workDateUtc, window.start, window.end);
 
   const lateMinutes = calculateLateMinutes(window.start, now);
@@ -2990,6 +3009,15 @@ async function handleGroupTimeIn(
     await sendMessage(
       chatId,
       `⚠️ ${mention}, Time In is not open yet.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled start: ${formatUtc(window.start)} UTC\nLocal: ${formatLocal(window.start, member.timezone)}\nTime In is available at the scheduled start time.`,
+      { parseMode: "HTML" }
+    );
+    return;
+  }
+
+  if (!isBeforeScheduledTime(window.end, now)) {
+    await sendMessage(
+      chatId,
+      `⚠️ ${mention}, Time In is closed.${swap ? `\nCovering: ${escapeHtmlForMention(swap.counterpartMemberName)}'s shift (approved swap)` : ""}\nScheduled shift: ${formatUtc(window.start)}–${formatUtc(window.end)} UTC\nLocal: ${formatLocal(window.start, member.timezone)} – ${formatLocal(window.end, member.timezone)}\nYour shift already ended at ${formatUtc(window.end)} UTC, so Time In is no longer available.`,
       { parseMode: "HTML" }
     );
     return;
