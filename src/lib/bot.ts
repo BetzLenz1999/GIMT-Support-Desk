@@ -295,7 +295,7 @@ async function sendGroupWelcome(
   try {
     await sendMessage(
       chat.id,
-      `👋 Hey ${names}, welcome to <b>GoodDollar</b>! We're glad to have you on board. 🚀\n\nThis channel is where we push forward the conversation around building a people-powered, decentralized basic income on the blockchain — sharing current news and ideas along the way.\n\n✨ <a href="https://goodwallet.xyz">Start claiming</a> — sign up and get your G$\n💬 <a href="https://t.me/GoodDollarX">Telegram Community</a>\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n\nHappy claiming! 🎉`,
+      `👋 Hey ${names}, welcome to the <b>Support Desk</b>! 🎉\n\nThis group is focused on assisting our users — our support team is here to help with GoodDollar, face verification, swap, bridge, and more.\n\n💬 Ask your questions here and we'll help you out.\n🛠️ <a href="https://t.me/+2pQlOfCBG11iYzFk">Support Team</a>\n🗣️ If you want to join the general discussion group, join here: <a href="https://t.me/GoodDollarX">t.me/GoodDollarX</a>\n\nWelcome aboard! 🎉`,
       { parseMode: "HTML", replyToMessageId: options.replyToMessageId }
     );
   } catch (error) {
