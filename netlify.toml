@@ -55,6 +55,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/cron/health"
+  to = "/.netlify/functions/cron-health"
+  status = 200
+
+[[redirects]]
   from = "/api/cron/daily-report"
   to = "/.netlify/functions/cron-daily-report"
   status = 200
