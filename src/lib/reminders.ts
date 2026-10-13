@@ -1,6 +1,7 @@
 import type { Registration, SupabaseRestClient } from "./supabase.js";
 import { createActivity, findTimeLog, hasCronEvent, listActiveSupportTicketsForInactivitySweep, listRegistrations, listSupportTicketMessages, recordCronEvent, recordSupportTicketEvent, updateSupportTicket, upsertProofOfWorkReminder } from "./repository.js";
 import { sendSupportIntroToGroups, sendTeamGroupMessage, sweepExpiredGroupActionMessages } from "./group-notifications.js";
+import { checkCronStaleness, recordCronHeartbeat } from "./cron-health.js";
 import { dashboardKeyboard, proofOfWorkKeyboard } from "./keyboards.js";
 import { TEAM_SCHEDULE, getTeamMember } from "./team-schedule.js";
 import { sendMessage } from "./telegram.js";
@@ -40,7 +41,7 @@ function isDueAfter(minutesSinceTarget: number, startMinutesAfter: number): bool
   return minutesSinceTarget >= startMinutesAfter;
 }
 
-export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; supportIntroSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; errors: number }> {
+export async function runTimekeepingCron(db: SupabaseRestClient, now = new Date()): Promise<{ sent: number; groupSent: number; supportIntroSent: number; encouragementSent: number; sweptExpired: number; inactiveClosedTickets: number; cronStaleAlerted: boolean; errors: number }> {
   let sent = 0;
   let groupSent =  ​0;
   let supportIntroSent =  0;
@@ -275,8 +276,32 @@ Current: ${formatUtc(now)} UTC`;
     );
   }
 
+  // Detect a stalled scheduler before recording this run: if the previous
+  // heartbeat is missing or older than the threshold, the scheduled runs have
+  // stopped (for example a locked GitHub account) and reminders were skipped.
+  // Alerting from here surfaces the gap on the next run, and /api/cron/health
+  // surfaces it even when no run ever happens again.
+  let cronStaleAlerted = false;
+  try {
+    const staleness = await checkCronStaleness(db, now);
+    cronStaleAlerted = staleness.alerted;
+  } catch (error) {
+    errors += 1;
+    console.error(
+      `Cron staleness check failed: ${error instanceof Error ? error.message : String(error)}`, error,
+    );
+  }
 
-  return { sent, groupSent, supportIntroSent, encouragementSent, sweptExpired, inactiveClosedTickets, errors };
+  try {
+    await recordCronHeartbeat(db, now);
+  } catch (error) {
+    errors += 1;
+    console.error(
+      `Failed to record cron heartbeat: ${error instanceof Error ? error.message : String(error)}`, error,
+    );
+  }
+
+  return { sent, groupSent, supportIntroSent, encouragementSent, sweptExpired, inactiveClosedTickets, cronStaleAlerted, errors };
 }
 
 async function sendTeamEncouragementReminder(

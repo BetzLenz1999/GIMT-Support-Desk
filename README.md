@@ -36,6 +36,10 @@ TEAM_GROUP_CHAT_ID=
 TEAM_STATS_GROUP_CHAT_IDS=
 # Optional support flow switch: old or ai
 SUPPORT_MODE=old
+# Optional timekeeping-cron watchdog: minutes without a successful run before /api/cron/health reports stale
+CRON_STALE_AFTER_MINUTES=45
+# Optional timekeeping-cron watchdog: minimum hours between repeated stale alerts
+CRON_STALE_REALERT_HOURS=6
 ```
 
 `SUPABASE_ANON_KEY` is supported only as a fallback, but `SUPABASE_SERVICE_ROLE_KEY` is recommended because the bot runs server-side and performs trusted writes.
@@ -139,6 +143,17 @@ On Netlify, configure scheduled calls to the same URLs (`/api/cron/timekeeping` 
 
 Both endpoints accept either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET` when `CRON_SECRET` is configured.
 
+### Timekeeping cron health check
+
+`GET /api/cron/health` reports whether the timekeeping cron is still running. It compares the current time with the heartbeat written by the last successful `/api/cron/timekeeping` run and returns:
+
+- `200` with `status: "healthy"` when the last run is within `CRON_STALE_AFTER_MINUTES` (default `45`).
+- `503` with `status: "stale"` when the heartbeat is missing or older than that threshold.
+
+On a stale result the endpoint also posts a one-time team-group alert (at most once per `CRON_STALE_REALERT_HOURS`, default `6`) so the team learns that reminders stopped instead of the outage staying silent. Pass `?alert=0` to skip the group alert, and `?secret=<CRON_SECRET>` when `CRON_SECRET` is configured.
+
+Point an uptime monitor (UptimeRobot, cron-job.org, or any HTTP checker) at this path and treat a `503` as down. This catches the exact failure mode seen in this repo: a locked GitHub account or billing issue stops every scheduled run before a single step executes, so reminders vanish with no error, while the health check still turns red because the heartbeat goes stale.
+
 ## Telegram group chat ID setup
 
 To get `TEAM_GROUP_CHAT_ID`:
@@ -169,7 +184,7 @@ The workflow runs every 5 minutes and can also be started manually from the **Ac
 GET https://<your-deployment>/api/cron/timekeeping?secret=<CRON_SECRET>
 ```
 
-The endpoint accepts either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`. Keep the GitHub Actions workflow as a backup if you like; both call the same endpoint and reminders are deduplicated per member per work date via `cron_events`, so running both will not double-send. If the scheduler is configured, you can also add a plain `GET` monitor to `/api/cron/timekeeping` so a failure surfaces as a down alert instead of silent missed reminders.
+The endpoint accepts either `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`. Keep the GitHub Actions workflow as a backup if you like; both call the same endpoint and reminders are deduplicated per member per work date via `cron_events`, so running both will not double-send. Pair the scheduler with a monitor on `GET /api/cron/health` (see [Timekeeping cron health check](#timekeeping-cron-health-check)) so a stalled scheduler surfaces as a down alert and a team-group warning instead of silent missed reminders.
 
 If the cron is not scheduled, manual Time In/Out and Proof of Work submissions can still work, but the group reminder messages will not be sent automatically, including the daily "assistant today" intros in the stats groups.
 
