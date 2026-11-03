@@ -732,6 +732,33 @@
         white-space: nowrap;
       }
       .dark .member-focus-all { color: rgb(94 234 212); }
+      /* Calm, consistent dashboard surface */
+      body { background: #f5f7fa !important; }
+      .dark body { background: #0b1220 !important; }
+      .dashboard-shell { max-width: 1440px; }
+      header { border-color: #e4e8ef !important; background: rgba(255,255,255,.96) !important; box-shadow: 0 2px 10px rgba(15,23,42,.04) !important; }
+      .dark header { border-color: #263247 !important; background: rgba(15,23,42,.96) !important; }
+      .section-card, .menu-card, .welcome-card { box-shadow: 0 3px 12px rgba(15,23,42,.045) !important; }
+      .section-card { border-color: #e2e7ee; }
+      .welcome-card { border-color: #e2e7ee; background: #fff; }
+      .dark .welcome-card { background: #0f172a; }
+      .tab-btn { border-color: transparent !important; border-radius: 9px !important; color: #526174 !important; }
+      .tab-btn:hover { background: #f0f4f7 !important; color: #172536 !important; }
+      .tab-btn[aria-selected="true"] { background: #e6f4f1 !important; border-color: #c8e4de !important; color: #176b61 !important; }
+      .dark .tab-btn { color: #b3bfd0 !important; }
+      .dark .tab-btn:hover { background: #1e293b !important; color: #f1f5f9 !important; }
+      .dark .tab-btn[aria-selected="true"] { background: #123c39 !important; border-color: #22645e !important; color: #9de4d7 !important; }
+      .summary-date-shortcut { padding: 7px 10px; border: 1px solid #e2e7ee; border-radius: 8px; background: white; color: #435267; font-size: 12px; font-weight: 600; }
+      .summary-date-shortcut:hover { border-color: #8cc7bd; background: #f3faf8; color: #176b61; }
+      .dark .summary-date-shortcut { border-color: #334155; background: #0f172a; color: #d1d9e4; }
+      .summary-skeleton { height: 92px; border: 1px solid #e8edf2; border-radius: 14px; background: linear-gradient(90deg,#fff 25%,#f3f6f8 50%,#fff 75%); background-size: 200% 100%; animation: summary-loading 1.4s infinite; }
+      @keyframes summary-loading { to { background-position: -200% 0; } }
+      .summary-stat-card { min-height: 108px; padding: 16px; border: 1px solid #e3e8ef; border-radius: 14px; background: #fff; }
+      .dark .summary-stat-card { border-color: #29364a; background: #111c2e; }
+      .summary-topic-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 0; border-bottom:1px solid #edf0f4; }
+      .summary-topic-row:last-child { border-bottom:0; }
+      .dark .summary-topic-row { border-color:#29364a; }
+      @media (max-width: 640px) { #daily-summary-content .summary-stat-card { min-height: 88px; } }
     </style>
   </head>
   <body class="min-h-full bg-gradient-to-br from-slate-50 via-teal-50 to-sky-50 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950 dark:text-slate-100">
@@ -749,8 +776,9 @@
           </button>
         </div>
       </div>
-      <nav class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist">
-        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Home</button>
+      <nav class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 pb-2.5 flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Dashboard sections">
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="daily-summary">Overview</button>
+        <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="home">Team</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="activity">Activity History</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="stats">Stats</button>
         <button class="tab-btn px-3 py-1.5 rounded-md text-sm font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-slate-800 whitespace-nowrap" role="tab" aria-selected="false" data-tab="proof">Proof of Work</button>
@@ -761,6 +789,27 @@
     </header>
 
     <main class="dashboard-shell max-w-screen-2xl mx-auto px-3 sm:px-4 py-4 sm:py-5">
+      <section data-tab-panel="daily-summary">
+        <div class="flex items-end justify-between gap-4 flex-wrap mb-5">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700 dark:text-teal-300 mb-1">Community support</p>
+            <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">Daily Summary</h2>
+            <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">A clear snapshot of questions and support tickets for one selected day.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-2.5 shadow-sm">
+            <button type="button" id="summary-yesterday" class="summary-date-shortcut">Yesterday</button>
+            <button type="button" id="summary-today" class="summary-date-shortcut">Today</button>
+            <label for="summary-date" class="text-xs font-medium text-slate-600 dark:text-slate-300">Date (UTC)</label>
+            <input id="summary-date" type="date" class="filter-control w-auto min-w-0" />
+          </div>
+        </div>
+        <div id="daily-summary-content" aria-live="polite">
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+            <div class="summary-skeleton"></div><div class="summary-skeleton"></div><div class="summary-skeleton"></div><div class="summary-skeleton"></div>
+          </div>
+        </div>
+        <p class="mt-4 text-xs text-slate-500 dark:text-slate-400">Ticket counts are based on their created date in UTC. Current ticket status may have changed since that date.</p>
+      </section>
       <section data-tab-panel="home">
         <div class="welcome-card rounded-3xl p-5 sm:p-7 mb-4 overflow-hidden relative">
           <div class="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/50 dark:bg-teal-500/10"></div>

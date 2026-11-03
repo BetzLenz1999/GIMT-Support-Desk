@@ -12,7 +12,8 @@ const ACTION_LABEL = {
   shift_swap_response: "Shift Swap Response",
   registered: "Registered",
   REPEATED_ISSUE_REPORT: "Repeated Issue Report",
-  DAILY_REPORT: "Daily Report"
+  DAILY_REPORT: "Daily Report",
+  COMMUNITY_SUPPORT_DAILY_SUMMARY: "Community Support Summary"
 };
 
 const ACTION_PILL = {
@@ -26,7 +27,8 @@ const ACTION_PILL = {
   shift_swap_response: "pill-slate",
   registered: "pill-slate",
   REPEATED_ISSUE_REPORT: "pill-blue",
-  DAILY_REPORT: "pill-blue"
+  DAILY_REPORT: "pill-blue",
+  COMMUNITY_SUPPORT_DAILY_SUMMARY: "pill-blue"
 };
 
 const PROOF_STATUS_PILL = {
@@ -61,8 +63,9 @@ const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const DOW_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const state = {
-  currentTab: "home",
+  currentTab: "daily-summary",
   members: [],
+  dailySummary: { date: "", data: null, loading: false, requestId: 0 },
   activity: {
     rows: [],
     sort: { key: "created_at", ascending: false },
@@ -355,6 +358,72 @@ async function fetchJson(path) {
 
 function setLastUpdated() {
   $("#last-updated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+}
+
+function utcDateKeyForOffset(days = 0) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function renderDailySummary() {
+  const host = $("#daily-summary-content");
+  const summary = state.dailySummary.data;
+  if (state.dailySummary.loading) {
+    host.innerHTML = '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5"><div class="summary-skeleton"></div><div class="summary-skeleton"></div><div class="summary-skeleton"></div><div class="summary-skeleton"></div></div><div class="section-card p-5 text-sm text-slate-500 dark:text-slate-400">Loading the selected day…</div>';
+    return;
+  }
+  if (!summary) {
+    host.innerHTML = '<div class="section-card p-5 text-sm text-slate-500 dark:text-slate-400">Choose a date to view its summary.</div>';
+    return;
+  }
+  const stats = [
+    { label: "New questions", value: summary.total_tickets, note: "Tickets opened that day", tone: "text-slate-900 dark:text-white" },
+    { label: "Still open", value: summary.open_tickets, note: "Current status", tone: "text-amber-700 dark:text-amber-300" },
+    { label: "Resolved", value: summary.resolved_tickets, note: "Solved or closed by team", tone: "text-emerald-700 dark:text-emerald-300" },
+    { label: "Moderator review", value: summary.needs_moderator_review, note: "Needs moderator attention", tone: "text-rose-700 dark:text-rose-300" }
+  ];
+  const categories = Array.isArray(summary.categories) ? summary.categories : [];
+  host.innerHTML = `
+    <div class="mb-4 text-sm font-medium text-slate-600 dark:text-slate-300">${escapeHtml(fmtReportDate(summary.date))} <span class="text-xs font-normal text-slate-400">· UTC</span></div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+      ${stats.map((card) => `<div class="summary-stat-card"><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">${escapeHtml(card.label)}</div><div class="mt-2 text-3xl font-bold tracking-tight ${card.tone}">${escapeHtml(card.value)}</div><div class="mt-1 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(card.note)}</div></div>`).join("")}
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <section class="section-card p-4 sm:p-5 lg:col-span-2">
+        <div class="mb-1"><h3 class="text-base font-semibold">Community questions</h3><p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Most common topics and a concise example summary for the selected day.</p></div>
+        ${categories.length ? `<div class="mt-3">${categories.slice(0, 8).map((item) => `<div class="summary-topic-row"><div class="min-w-0"><div class="font-semibold text-sm">${escapeHtml(item.category)}</div><p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">${escapeHtml(item.sample_summary || "No message summary available.")}</p></div><div class="shrink-0 text-right"><div class="text-lg font-bold">${escapeHtml(item.count)}</div><div class="text-[11px] text-slate-500 dark:text-slate-400">${Number(item.open_count) ? `${escapeHtml(item.open_count)} open` : "questions"}</div></div></div>`).join("")}</div>` : '<div class="mt-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-6 text-center text-sm text-slate-500 dark:text-slate-400">No support questions were recorded for this date.</div>'}
+      </section>
+      <aside class="section-card p-4 sm:p-5">
+        <h3 class="text-base font-semibold">Key highlights</h3>
+        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Quick takeaways for moderators.</p>
+        <div class="mt-4 space-y-3">
+          ${summary.total_tickets ? `<div class="rounded-xl bg-slate-50 dark:bg-slate-800/70 p-3"><div class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Top topic</div><div class="mt-1 font-semibold">${escapeHtml(categories[0]?.category || "Support questions")}</div><div class="text-sm text-slate-600 dark:text-slate-300">${escapeHtml(categories[0]?.count ?? summary.total_tickets)} question(s)</div></div>` : '<div class="rounded-xl bg-slate-50 dark:bg-slate-800/70 p-3 text-sm text-slate-600 dark:text-slate-300">Quiet day — no new support tickets.</div>'}
+          ${summary.needs_moderator_review ? `<div class="rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/30"><div class="text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">Needs attention</div><div class="mt-1 text-sm text-rose-800 dark:text-rose-200">${escapeHtml(summary.needs_moderator_review)} ticket(s) need moderator review.</div></div>` : '<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">No tickets currently flagged for moderator review.</div>'}
+          <button type="button" class="summary-date-shortcut w-full" id="summary-open-tickets">Open Support Tickets</button>
+        </div>
+      </aside>
+    </div>`;
+  $("#summary-open-tickets")?.addEventListener("click", () => switchTab("tickets"));
+}
+
+async function loadDailySummary() {
+  const date = $("#summary-date").value || utcDateKeyForOffset(-1);
+  const requestId = ++state.dailySummary.requestId;
+  state.dailySummary.date = date;
+  state.dailySummary.loading = true;
+  renderDailySummary();
+  try {
+    const result = await fetchJson(`/api/web/daily-summary?date=${encodeURIComponent(date)}`);
+    if (requestId !== state.dailySummary.requestId) return;
+    state.dailySummary.data = result.summary;
+  } catch (error) {
+    if (requestId !== state.dailySummary.requestId) return;
+    state.dailySummary.data = null;
+    $("#daily-summary-content").innerHTML = `<div class="section-card border border-rose-200 p-5 text-sm text-rose-700 dark:border-rose-900 dark:text-rose-300">Could not load this summary: ${escapeHtml(error.message || "Unknown error")}</div>`;
+  } finally {
+    if (requestId !== state.dailySummary.requestId) return;
+    state.dailySummary.loading = false;
+    if (state.dailySummary.data) renderDailySummary();
+  }
 }
 
 function compareValues(a, b) {
@@ -2018,6 +2087,7 @@ function switchTab(name) {
 
 function refreshCurrent() {
   setLastUpdated();
+  if (state.currentTab === "daily-summary") loadDailySummary();
   if (state.currentTab === "home") return;
   if (state.currentTab === "activity") loadActivity();
   else if (state.currentTab === "stats") loadStats();
@@ -2038,6 +2108,7 @@ function initDefaultDates() {
   $("#proof-to").value = iso(today);
   $("#tickets-from").value = iso(thirtyDaysAgo);
   $("#tickets-to").value = iso(today);
+  $("#summary-date").value = utcDateKeyForOffset(-1);
 }
 
 function toggleWeek(section, key) {
@@ -2073,6 +2144,15 @@ async function init() {
     btn.addEventListener("click", () => switchTab(btn.dataset.menuTab));
   }
   $("#refresh-btn").addEventListener("click", refreshCurrent);
+  $("#summary-date").addEventListener("change", loadDailySummary);
+  $("#summary-yesterday").addEventListener("click", () => {
+    $("#summary-date").value = utcDateKeyForOffset(-1);
+    loadDailySummary();
+  });
+  $("#summary-today").addEventListener("click", () => {
+    $("#summary-date").value = utcDateKeyForOffset(0);
+    loadDailySummary();
+  });
 
   // Activity filters (client-side over the loaded set)
   $("#activity-member").addEventListener("change", (e) => {
@@ -2370,7 +2450,7 @@ async function init() {
     showMemberTabButton(true);
     switchTab("member");
   } else {
-    switchTab("home");
+    switchTab("daily-summary");
   }
   setInterval(refreshCurrent, 60_000);
 }
